@@ -1,0 +1,178 @@
+scs2-examples (mainDependencies)
++-- org.fxyz3d:fxyz3d:0.6.0                                [external, not traversed]
++-- us.ihmc:scs2-simulation-construction-set:source        [local: scs2-simulation-construction-set]
+|   +-- us.ihmc:scs2-simulation:source                     [local: scs2-simulation]
+|   |   +-- us.ihmc:scs2-definition:source                 [local: scs2-definition]
+|   |   |   +-- us.ihmc:euclid:0.22.5                      [GitHub: ihmcrobotics/euclid (main)]
+|   |   |   |   +-- org.ejml:ejml-core:0.39                [external, not traversed]
+|   |   |   +-- us.ihmc:euclid-shape:0.22.5                [GitHub: ihmcrobotics/euclid (shape)]
+|   |   |   |   +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |   |   +-- us.ihmc:euclid-geometry:0.22.5         [GitHub: ihmcrobotics/euclid (geometry)]
+|   |   |   |   |   +-- us.ihmc:euclid:0.22.5              (see above)
+|   |   |   |   +-- org.ejml:ejml-ddense:0.39              [external, not traversed]
+|   |   |   +-- us.ihmc:euclid-frame:0.22.5                [GitHub: ihmcrobotics/euclid (frame)]
+|   |   |   |   +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |   |   +-- us.ihmc:euclid-geometry:0.22.5         (see above)
+|   |   |   +-- us.ihmc:ihmc-commons:0.35.1                [GitHub: ihmcrobotics/ihmc-commons]
+|   |   |   |   +-- org.apache.commons:commons-lang3:3.12.0    [external, not traversed]
+|   |   |   |   +-- commons-io:commons-io:2.11.0               [external, not traversed]
+|   |   |   |   +-- us.ihmc:log-tools:0.6.5                [GitHub: ihmcrobotics/log-tools]
+|   |   |   |       +-- org.apache.logging.log4j:log4j-api:2.24.1            [external]
+|   |   |   |       +-- org.apache.logging.log4j:log4j-core:2.24.1           [external]
+|   |   |   |       +-- org.apache.logging.log4j:log4j-slf4j-impl:2.24.1     [external]
+|   |   |   |       +-- com.fasterxml.jackson.core:jackson-databind:2.18.1   [external]
+|   |   |   |       +-- com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.1  [external]
+|   |   |   |       +-- org.fusesource.jansi:jansi:2.4.0                     [external]
+|   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7            [GitHub: ihmcrobotics/ihmc-yovariables (main)]
+|   |   |   |   +-- net.sf.trove4j:trove4j:3.0.3           [external, not traversed]
+|   |   |   |   +-- com.sun.xml.bind:jaxb-impl:4.0.5       [external, not traversed]
+|   |   |   |   +-- us.ihmc:ihmc-commons:0.35.1            (see above)
+|   |   |   |   +-- us.ihmc:euclid-frame:0.22.5            (see above)
+|   |   |   +-- us.ihmc:mecano:17-0.19.3                   [GitHub: ihmcrobotics/mecano (main)]
+|   |   |       +-- org.ejml:ejml-core:0.39                [external, not traversed]
+|   |   |       +-- org.ejml:ejml-ddense:0.39              [external, not traversed]
+|   |   |       +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |       +-- us.ihmc:euclid-frame:0.22.5            (see above)
+|   |   |       +-- us.ihmc:euclid-geometry:0.22.5         (see above)
+|   |   +-- us.ihmc:scs2-shared-memory:source              [local: scs2-shared-memory]
+|   |   |   +-- us.ihmc:scs2-definition:source             (see above)
+|   |   |   +-- us.ihmc:euclid:0.22.5                      (see above)
+|   |   |   +-- us.ihmc:euclid-frame:0.22.5                (see above)
+|   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7            (see above)
+|   |   |   +-- us.hebi.matlab.mat:mfl-core:0.5.7          [external, not traversed]
+|   |   +-- us.ihmc:scs2-session:source                    [local: scs2-session]
+|   |   |   +-- us.ihmc:scs2-definition:source             (see above)
+|   |   |   +-- us.ihmc:scs2-shared-memory:source          (see above)
+|   |   |   +-- us.ihmc:scs2-symbolic:source               [local: scs2-symbolic]
+|   |   |   |   +-- us.ihmc:scs2-definition:source         (see above)
+|   |   |   |   +-- us.ihmc:scs2-shared-memory:source      (see above)
+|   |   |   |   +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |   |   +-- us.ihmc:euclid-frame:0.22.5            (see above)
+|   |   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7        (see above)
+|   |   |   +-- us.ihmc:ihmc-messager:0.2.0                [GitHub: ihmcrobotics/ihmc-messager (main)]
+|   |   |       +-- net.sf.trove4j:trove4j:3.0.3           [external, not traversed]
+|   |   |       +-- us.ihmc:ihmc-commons:0.34.0            [GitHub, older variant of ihmc-commons]
+|   |   |       +-- us.ihmc:log-tools:0.6.3                [GitHub: ihmcrobotics/log-tools (older)]
+|   |   +-- us.ihmc:euclid-frame-shape:0.22.5              [GitHub: ihmcrobotics/euclid (frame-shape)]
+|   |   |   +-- us.ihmc:euclid:0.22.5                      (see above)
+|   |   |   +-- us.ihmc:euclid-geometry:0.22.5             (see above)
+|   |   |   +-- us.ihmc:euclid-shape:0.22.5                (see above)
+|   |   |   +-- us.ihmc:euclid-frame:0.22.5                (see above)
+|   |   +-- us.ihmc:ihmc-messager:0.2.0                    (see above)
+|   |   +-- us.ihmc:mecano-yovariables:17-0.19.3           [GitHub: ihmcrobotics/mecano (yovariables)]
+|   |       +-- us.ihmc:mecano:17-0.19.3                   (see above)
+|   |       +-- us.ihmc:ihmc-yovariables:0.13.7            (see above)
+|   +-- us.ihmc:scs2-session:source                        (see above)
+|   +-- us.ihmc:scs2-session-logger:source                 [local: scs2-session-logger]
+|   |   +-- us.ihmc:scs2-session:source                    (see above)
+|   |   +-- us.ihmc:scs2-simulation:source                 (see above)
+|   |   +-- us.ihmc:ihmc-robot-data-logger:0.37.3          [GitHub: ihmcrobotics/ihmc-robot-data-logger]
+|   |   |   +-- com.google.protobuf:protobuf-java:2.6.1                [external]
+|   |   |   +-- net.sf.trove4j:trove4j:3.0.3                            [external]
+|   |   |   +-- org.jcommander:jcommander:3.0                          [external]
+|   |   |   +-- com.google.guava:guava:18.0                            [external]
+|   |   |   +-- org.xerial.snappy:snappy-java:1.1.10.8                 [external]
+|   |   |   +-- net.jpountz.lz4:lz4:1.3.0                              [external]
+|   |   |   +-- com.github.luben:zstd-jni:1.5.6-3                      [external]
+|   |   |   +-- io.netty:netty-all:4.1.77.Final                        [external]
+|   |   |   +-- org.openjdk.jol:jol-core:0.9                           [external]
+|   |   |   +-- org.apache.commons:commons-text:1.9                    [external]
+|   |   |   +-- us.ihmc:euclid:0.22.5                                  (see above)
+|   |   |   +-- us.ihmc:ihmc-video-codecs:2.1.6            [GitHub: ihmcrobotics/ihmc-video-codecs]
+|   |   |   |   +-- org.apache.commons:commons-compress:1.8.1          [external, not traversed]
+|   |   |   +-- us.ihmc:ihmc-realtime:1.7.1                [GitHub: ihmcrobotics/ihmc-realtime]
+|   |   |   |   +-- us.ihmc:ihmc-native-library-loader:2.0.6   [GitHub: ihmcrobotics/ihmc-native-library-loader (no deps)]
+|   |   |   +-- us.ihmc:ihmc-java-decklink-capture:0.4.0   [GitHub: ihmcrobotics/ihmc-java-decklink-capture]
+|   |   |   |   +-- us.ihmc:ihmc-native-library-loader:1.3.1   [GitHub: ihmcrobotics/ihmc-native-library-loader (older)]
+|   |   |   |   +-- com.martiansoftware:jsap:2.1                       [external, not traversed]
+|   |   |   +-- us.ihmc:ros2-library:1.2.1                 [GitHub: ihmcrobotics/ihmc-ros2-library (ros2-library)]
+|   |   |   |   +-- us.ihmc:ihmc-pub-sub:source                        [GitHub: ihmcrobotics/ihmc-ros2-library (ihmc-pub-sub)]
+|   |   |   |   |   +-- us.ihmc:ihmc-native-library-loader:2.0.3       [GitHub, older variant]
+|   |   |   |   |   +-- net.sf.trove4j:trove4j:3.0.3                   [external]
+|   |   |   |   |   +-- us.ihmc:euclid:0.22.3                          [GitHub, older variant of euclid]
+|   |   |   |   |   +-- us.ihmc:ihmc-commons:0.35.1                    (see above)
+|   |   |   |   |   +-- us.ihmc:log-tools:0.6.4                        [GitHub: ihmcrobotics/log-tools (intermediate version)]
+|   |   |   |   |   +-- us.ihmc:javacpp:1.5.11-ihmc-2                  [us.ihmc, custom build (not on GitHub), not traversed]
+|   |   |   |   +-- us.ihmc:ihmc-realtime:1.7.0                        [GitHub, older variant of ihmc-realtime]
+|   |   |   |   +-- us.ihmc:ihmc-commons:0.35.1                        (see above)
+|   |   |   |   +-- us.ihmc:ros2-common-interfaces:source              [GitHub: ihmcrobotics/ihmc-ros2-library (ros2-common-interfaces)]
+|   |   |   |       +-- us.ihmc:euclid-geometry:0.22.3                 [GitHub, older variant]
+|   |   |   |       +-- us.ihmc:ihmc-pub-sub:source                    (see above)
+|   |   |   +-- us.ihmc:ihmc-commons:0.35.1                            (see above)
+|   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7                        (see above)
+|   |   |   +-- us.ihmc:scs2-definition:17-0.32.0                      [published artifact of local scs2-definition; not re-traversed]
+|   |   |   +-- us.ihmc:mecano:17-0.19.3                               (see above)
+|   |   |   +-- com.fasterxml.jackson.core:jackson-databind:2.18.1     [external]
+|   |   |   +-- com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.1     [external]
+|   |   |   +-- com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.18.1      [external]
+|   |   |   +-- com.fasterxml.jackson.dataformat:jackson-dataformat-properties:2.18.1   [external]
+|   |   |   +-- com.hierynomus:sshj:0.31.0                             [external]
+|   |   |   +-- org.bytedeco:openblas:0.3.28-1.5.11 (+ natives)        [external]
+|   |   |   +-- us.ihmc:opencv:4.10.0-1.5.11-20260107-ihmc (+ natives) [us.ihmc, custom build (not on GitHub), not traversed]
+|   |   |   +-- org.bytedeco:ffmpeg:7.1-1.5.11 (+ natives)             [external]
+|   |   |   +-- us.ihmc:zed-java-api:5.1.0                 [GitHub: ihmcrobotics/zed-java-api]
+|   |   |   |   +-- org.bytedeco:javacpp:1.5.11                        [external]
+|   |   |   |   +-- org.bytedeco:cuda:12.6-9.5-1.5.11                  [external]
+|   |   |   |   +-- us.ihmc:ihmc-native-library-loader:2.0.4           [GitHub, older variant]
+|   |   |   +-- org.freedesktop.gstreamer:gst1-java-core:1.4.0         [external]
+|   |   |   +-- (JavaFX) base, controls, graphics, fxml @ 17.0.8       [external]
+|   |   +-- com.github.luben:zstd-jni:1.5.5-10                         [external, not traversed]
+|   |   +-- org.antlr:antlr4-runtime:4.13.1                            [external, not traversed]
+|   |   +-- com.github.vatbub:mslinks:1.0.6.2                          [external, not traversed]
+|   +-- us.ihmc:scs2-session-visualizer-jfx:source                     (see below)
++-- us.ihmc:scs2-session-visualizer-jfx:source             [local: scs2-session-visualizer-jfx]
+|   +-- us.ihmc:scs2-simulation:source                     (see above)
+|   +-- us.ihmc:scs2-session:source                        (see above)
+|   +-- us.ihmc:scs2-session-logger:source                 (see above)
+|   +-- us.ihmc:scs2-session-visualizer:source             [local: scs2-session-visualizer]
+|   |   +-- us.ihmc:scs2-definition:source                 (see above)
+|   |   +-- (JavaFX) base @ 17.0.8                         [external]
+|   +-- (JavaFX) base, controls, graphics, fxml, swing @ 17.0.8        [external]
+|   +-- us.ihmc:euclid:0.22.5                              (see above)
+|   +-- us.ihmc:euclid-shape:0.22.5                        (see above)
+|   +-- us.ihmc:euclid-frame:0.22.5                        (see above)
+|   +-- us.ihmc:ihmc-video-codecs:2.1.6                    (see above)
+|   +-- us.ihmc:ihmc-javafx-extensions:17-0.2.2            [GitHub: ihmcrobotics/ihmc-javafx-extensions]
+|   |   +-- (JavaFX) base, controls, graphics @ 17.0.8                 [external]
+|   |   +-- us.ihmc:euclid:0.22.3                          (see above note)
+|   +-- us.ihmc:ihmc-messager-javafx:0.2.1                 [GitHub: ihmcrobotics/ihmc-messager (javafx)]
+|   |   +-- us.ihmc:ihmc-messager:0.2.1                    [GitHub: ihmcrobotics/ihmc-messager (main, version 0.2.1 vs 0.2.0 above)]
+|   |   |   +-- net.sf.trove4j:trove4j:3.0.3                           [external]
+|   |   |   +-- us.ihmc:ihmc-commons:0.34.0                            (see note above)
+|   |   |   +-- us.ihmc:log-tools:0.6.3                                (see above)
+|   |   +-- (JavaFX) base, graphics @ 17.0.2                           [external]
+|   +-- org.reflections:reflections:0.9.11                             [external, not traversed]
+|   +-- org.controlsfx:controlsfx:11.1.0                               [external, not traversed]
+|   +-- de.jensd:fontawesomefx-commons:9.1.2                           [external, not traversed]
+|   +-- de.jensd:fontawesomefx-octicons:4.3.0-9.1.2                    [external, not traversed]
+|   +-- de.jensd:fontawesomefx-materialicons:2.2.0-9.1.2               [external, not traversed]
+|   +-- de.jensd:fontawesomefx-materialdesignfont:2.0.26-9.1.2         [external, not traversed]
+|   +-- org.kordamp.ikonli:ikonli-javafx:12.3.1                        [external, not traversed]
+|   +-- org.kordamp.ikonli:ikonli-fontawesome-pack:12.3.1              [external, not traversed]
+|   +-- org.kordamp.ikonli:ikonli-fontawesome5-pack:12.3.1             [external, not traversed]
+|   +-- us.ihmc:jfoenix:17-0.1.1                           [GitHub: ihmcrobotics/JFoenix-Group (jfoenix)]
+|   |   +-- (JavaFX) base, controls, graphics, fxml, swing @ 17.0.2    [external]
+|   +-- org.apache.commons:commons-text:1.9                            [external, not traversed]
+|   +-- us.ihmc:jim3dsModelImporterJFX:0.7                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimColModelImporterJFX:0.6                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimFxmlModelImporterJFX:0.5                [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimObjModelImporterJFX:0.8                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimStlMeshImporterJFX:0.7                  [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimX3dModelImporterJFX:0.4                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- com.squareup.okhttp3:okhttp:4.12.0                             [external, not traversed]
+|   +-- com.google.code.gson:gson:2.10.1                               [external, not traversed]
+|   +-- me.tongfei:progressbar:0.10.0                                  [external, not traversed]
+|   +-- commons-cli:commons-cli:1.6.0                                  [external, not traversed]
++-- us.ihmc:scs2-bullet-simulation:source                  [local: scs2-bullet-simulation (main)]
+|   +-- us.ihmc:scs2-simulation:source                     (see above)
+|   +-- us.ihmc:scs2-definition:source                     (see above)
+|   +-- us.ihmc:scs2-shared-memory:source                  (see above)
+|   +-- us.ihmc:scs2-session:source                        (see above)
+|   +-- us.ihmc:euclid-frame-shape:0.22.5                  (see above)
+|   +-- us.ihmc:ihmc-messager:0.2.1                        (see above)
+|   +-- us.ihmc:ihmc-yovariables:0.13.7                    (see above)
+|   +-- us.ihmc:mecano-yovariables:17-0.19.3               (see above)
+|   +-- org.bytedeco:bullet:3.25-1.5.11 (+ linux/windows natives)      [external, not traversed]
++-- us.ihmc:scs2-bullet-simulation-debug:source            [local: scs2-bullet-simulation (debug source set)]
+    +-- us.ihmc:scs2-bullet-simulation:source              (see above; debug source set sees 'main')
+    +-- us.ihmc:scs2-session-visualizer-jfx:source         (see above)

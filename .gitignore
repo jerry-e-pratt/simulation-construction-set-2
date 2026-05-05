@@ -90,3 +90,6 @@
 **/.apdisk
 **/rebel.xml
 **/generatedTestSuites/*TestSuite.java
+/gradle/wrapper/gradle-wrapper.properties
+/gradlew
+/gradlew.bat
