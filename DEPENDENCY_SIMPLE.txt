@@ -1,0 +1,113 @@
+scs2-examples (mainDependencies)
++-- us.ihmc:scs2-simulation-construction-set:source        [local: scs2-simulation-construction-set]
+|   +-- us.ihmc:scs2-simulation:source                     [local: scs2-simulation]
+|   |   +-- us.ihmc:scs2-definition:source                 [local: scs2-definition]
+|   |   |   +-- us.ihmc:euclid:0.22.5                      [GitHub: ihmcrobotics/euclid (main)]
+|   |   |   +-- us.ihmc:euclid-shape:0.22.5                [GitHub: ihmcrobotics/euclid (shape)]
+|   |   |   |   +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |   |   +-- us.ihmc:euclid-geometry:0.22.5         [GitHub: ihmcrobotics/euclid (geometry)]
+|   |   |   |   |   +-- us.ihmc:euclid:0.22.5              (see above)
+|   |   |   +-- us.ihmc:euclid-frame:0.22.5                [GitHub: ihmcrobotics/euclid (frame)]
+|   |   |   |   +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |   |   +-- us.ihmc:euclid-geometry:0.22.5         (see above)
+|   |   |   +-- us.ihmc:ihmc-commons:0.35.1                [GitHub: ihmcrobotics/ihmc-commons]
+|   |   |   |   +-- us.ihmc:log-tools:0.6.5                [GitHub: ihmcrobotics/log-tools]
+|   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7            [GitHub: ihmcrobotics/ihmc-yovariables (main)]
+|   |   |   |   +-- us.ihmc:ihmc-commons:0.35.1            (see above)
+|   |   |   |   +-- us.ihmc:euclid-frame:0.22.5            (see above)
+|   |   |   +-- us.ihmc:mecano:17-0.19.3                   [GitHub: ihmcrobotics/mecano (main)]
+|   |   |       +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |       +-- us.ihmc:euclid-frame:0.22.5            (see above)
+|   |   |       +-- us.ihmc:euclid-geometry:0.22.5         (see above)
+|   |   +-- us.ihmc:scs2-shared-memory:source              [local: scs2-shared-memory]
+|   |   |   +-- us.ihmc:scs2-definition:source             (see above)
+|   |   |   +-- us.ihmc:euclid:0.22.5                      (see above)
+|   |   |   +-- us.ihmc:euclid-frame:0.22.5                (see above)
+|   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7            (see above)
+|   |   +-- us.ihmc:scs2-session:source                    [local: scs2-session]
+|   |   |   +-- us.ihmc:scs2-definition:source             (see above)
+|   |   |   +-- us.ihmc:scs2-shared-memory:source          (see above)
+|   |   |   +-- us.ihmc:scs2-symbolic:source               [local: scs2-symbolic]
+|   |   |   |   +-- us.ihmc:scs2-definition:source         (see above)
+|   |   |   |   +-- us.ihmc:scs2-shared-memory:source      (see above)
+|   |   |   |   +-- us.ihmc:euclid:0.22.5                  (see above)
+|   |   |   |   +-- us.ihmc:euclid-frame:0.22.5            (see above)
+|   |   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7        (see above)
+|   |   |   +-- us.ihmc:ihmc-messager:0.2.0                [GitHub: ihmcrobotics/ihmc-messager (main)]
+|   |   |       +-- us.ihmc:ihmc-commons:0.34.0            [GitHub, older variant of ihmc-commons]
+|   |   |       +-- us.ihmc:log-tools:0.6.3                [GitHub: ihmcrobotics/log-tools (older)]
+|   |   +-- us.ihmc:euclid-frame-shape:0.22.5              [GitHub: ihmcrobotics/euclid (frame-shape)]
+|   |   |   +-- us.ihmc:euclid:0.22.5                      (see above)
+|   |   |   +-- us.ihmc:euclid-geometry:0.22.5             (see above)
+|   |   |   +-- us.ihmc:euclid-shape:0.22.5                (see above)
+|   |   |   +-- us.ihmc:euclid-frame:0.22.5                (see above)
+|   |   +-- us.ihmc:ihmc-messager:0.2.0                    (see above)
+|   |   +-- us.ihmc:mecano-yovariables:17-0.19.3           [GitHub: ihmcrobotics/mecano (yovariables)]
+|   |       +-- us.ihmc:mecano:17-0.19.3                   (see above)
+|   |       +-- us.ihmc:ihmc-yovariables:0.13.7            (see above)
+|   +-- us.ihmc:scs2-session:source                        (see above)
+|   +-- us.ihmc:scs2-session-logger:source                 [local: scs2-session-logger]
+|   |   +-- us.ihmc:scs2-session:source                    (see above)
+|   |   +-- us.ihmc:scs2-simulation:source                 (see above)
+|   |   +-- us.ihmc:ihmc-robot-data-logger:0.37.3          [GitHub: ihmcrobotics/ihmc-robot-data-logger]
+|   |   |   +-- us.ihmc:euclid:0.22.5                                  (see above)
+|   |   |   +-- us.ihmc:ihmc-video-codecs:2.1.6            [GitHub: ihmcrobotics/ihmc-video-codecs]
+|   |   |   +-- us.ihmc:ihmc-realtime:1.7.1                [GitHub: ihmcrobotics/ihmc-realtime]
+|   |   |   |   +-- us.ihmc:ihmc-native-library-loader:2.0.6   [GitHub: ihmcrobotics/ihmc-native-library-loader (no deps)]
+|   |   |   +-- us.ihmc:ihmc-java-decklink-capture:0.4.0   [GitHub: ihmcrobotics/ihmc-java-decklink-capture]
+|   |   |   |   +-- us.ihmc:ihmc-native-library-loader:1.3.1   [GitHub: ihmcrobotics/ihmc-native-library-loader (older)]
+|   |   |   +-- us.ihmc:ros2-library:1.2.1                 [GitHub: ihmcrobotics/ihmc-ros2-library (ros2-library)]
+|   |   |   |   +-- us.ihmc:ihmc-pub-sub:source                        [GitHub: ihmcrobotics/ihmc-ros2-library (ihmc-pub-sub)]
+|   |   |   |   |   +-- us.ihmc:ihmc-native-library-loader:2.0.3       [GitHub, older variant]
+|   |   |   |   |   +-- us.ihmc:euclid:0.22.3                          [GitHub, older variant of euclid]
+|   |   |   |   |   +-- us.ihmc:ihmc-commons:0.35.1                    (see above)
+|   |   |   |   |   +-- us.ihmc:log-tools:0.6.4                        [GitHub: ihmcrobotics/log-tools (intermediate version)]
+|   |   |   |   |   +-- us.ihmc:javacpp:1.5.11-ihmc-2                  [us.ihmc, custom build (not on GitHub), not traversed]
+|   |   |   |   +-- us.ihmc:ihmc-realtime:1.7.0                        [GitHub, older variant of ihmc-realtime]
+|   |   |   |   +-- us.ihmc:ihmc-commons:0.35.1                        (see above)
+|   |   |   |   +-- us.ihmc:ros2-common-interfaces:source              [GitHub: ihmcrobotics/ihmc-ros2-library (ros2-common-interfaces)]
+|   |   |   |       +-- us.ihmc:euclid-geometry:0.22.3                 [GitHub, older variant]
+|   |   |   |       +-- us.ihmc:ihmc-pub-sub:source                    (see above)
+|   |   |   +-- us.ihmc:ihmc-commons:0.35.1                            (see above)
+|   |   |   +-- us.ihmc:ihmc-yovariables:0.13.7                        (see above)
+|   |   |   +-- us.ihmc:scs2-definition:17-0.32.0                      [published artifact of local scs2-definition; not re-traversed]
+|   |   |   +-- us.ihmc:mecano:17-0.19.3                               (see above)
+|   |   |   +-- us.ihmc:opencv:4.10.0-1.5.11-20260107-ihmc (+ natives) [us.ihmc, custom build (not on GitHub), not traversed]
+|   |   |   +-- us.ihmc:zed-java-api:5.1.0                 [GitHub: ihmcrobotics/zed-java-api]
+|   |   |   |   +-- us.ihmc:ihmc-native-library-loader:2.0.4           [GitHub, older variant]
+|   +-- us.ihmc:scs2-session-visualizer-jfx:source                     (see below)
++-- us.ihmc:scs2-session-visualizer-jfx:source             [local: scs2-session-visualizer-jfx]
+|   +-- us.ihmc:scs2-simulation:source                     (see above)
+|   +-- us.ihmc:scs2-session:source                        (see above)
+|   +-- us.ihmc:scs2-session-logger:source                 (see above)
+|   +-- us.ihmc:scs2-session-visualizer:source             [local: scs2-session-visualizer]
+|   |   +-- us.ihmc:scs2-definition:source                 (see above)
+|   +-- us.ihmc:euclid:0.22.5                              (see above)
+|   +-- us.ihmc:euclid-shape:0.22.5                        (see above)
+|   +-- us.ihmc:euclid-frame:0.22.5                        (see above)
+|   +-- us.ihmc:ihmc-video-codecs:2.1.6                    (see above)
+|   +-- us.ihmc:ihmc-javafx-extensions:17-0.2.2            [GitHub: ihmcrobotics/ihmc-javafx-extensions]
+|   |   +-- us.ihmc:euclid:0.22.3                          (see above note)
+|   +-- us.ihmc:ihmc-messager-javafx:0.2.1                 [GitHub: ihmcrobotics/ihmc-messager (javafx)]
+|   |   +-- us.ihmc:ihmc-messager:0.2.1                    [GitHub: ihmcrobotics/ihmc-messager (main, version 0.2.1 vs 0.2.0 above)]
+|   |   |   +-- us.ihmc:ihmc-commons:0.34.0                            (see note above)
+|   |   |   +-- us.ihmc:log-tools:0.6.3                                (see above)
+|   +-- us.ihmc:jfoenix:17-0.1.1                           [GitHub: ihmcrobotics/JFoenix-Group (jfoenix)]
+|   +-- us.ihmc:jim3dsModelImporterJFX:0.7                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimColModelImporterJFX:0.6                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimFxmlModelImporterJFX:0.5                [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimObjModelImporterJFX:0.8                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimStlMeshImporterJFX:0.7                  [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
+|   +-- us.ihmc:jimX3dModelImporterJFX:0.4                 [us.ihmc, no GitHub repo (republished InteractiveMesh.org), not traversed]
++-- us.ihmc:scs2-bullet-simulation:source                  [local: scs2-bullet-simulation (main)]
+|   +-- us.ihmc:scs2-simulation:source                     (see above)
+|   +-- us.ihmc:scs2-definition:source                     (see above)
+|   +-- us.ihmc:scs2-shared-memory:source                  (see above)
+|   +-- us.ihmc:scs2-session:source                        (see above)
+|   +-- us.ihmc:euclid-frame-shape:0.22.5                  (see above)
+|   +-- us.ihmc:ihmc-messager:0.2.1                        (see above)
+|   +-- us.ihmc:ihmc-yovariables:0.13.7                    (see above)
+|   +-- us.ihmc:mecano-yovariables:17-0.19.3               (see above)
++-- us.ihmc:scs2-bullet-simulation-debug:source            [local: scs2-bullet-simulation (debug source set)]
+    +-- us.ihmc:scs2-bullet-simulation:source              (see above; debug source set sees 'main')
+    +-- us.ihmc:scs2-session-visualizer-jfx:source         (see above)
