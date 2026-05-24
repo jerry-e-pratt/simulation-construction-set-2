@@ -448,7 +448,7 @@ charsets):
 ```bat
 jlink ^
   --module-path "%JAVA_HOME%\jmods;%JAVAFX_JMODS_DIR%" ^
-  --add-modules java.base,java.compiler,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql,java.xml,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.unsupported,jdk.unsupported.desktop,javafx.base,javafx.controls,javafx.fxml,javafx.graphics,javafx.swing ^
+  --add-modules java.base,java.compiler,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql,java.xml,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.unsupported,jdk.unsupported.desktop,jdk.zipfs,javafx.base,javafx.controls,javafx.fxml,javafx.graphics,javafx.swing ^
   --strip-debug ^
   --no-man-pages ^
   --no-header-files ^
@@ -467,6 +467,12 @@ Notes on module choices specific to this codebase:
   uses `sun.misc.Unsafe`.
 - `jdk.unsupported.desktop` is required by JavaFX Swing interop
   (`SwingNode`).
+- `jdk.zipfs` registers the `"jar"`/`"zip"` `FileSystemProvider`.
+  `YoGraphicFXResourceManager` enumerates icon resources via
+  `FileSystems.newFileSystem(URI.create("jar:..."))`; without this
+  module the app fails its first JavaFX-thread initialisation with
+  `ProviderNotFoundException: Provider "jar" not found` and the
+  primary window never appears.
 - `java.scripting` is included defensively — some `gson` reflection
   paths probe for `javax.script` types.
 
@@ -524,6 +530,7 @@ Repeat every check from Stage 1.5. In addition:
 | SSL handshake failures after install | Missing `jdk.crypto.ec` (or `jdk.crypto.cryptoki` for some endpoints) — add and rebuild. |
 | `NoClassDefFoundError: sun.misc.Unsafe` | Missing `jdk.unsupported`. |
 | `IllegalAccessError` from JavaFX Swing interop | Missing `jdk.unsupported.desktop`. |
+| `ProviderNotFoundException: Provider "jar" not found` on startup, primary window never opens | Missing `jdk.zipfs`. Service-loader-only module, not auto-resolved by `jdeps`. |
 | Time-zone or formatting errors for non-en-US locales | Drop `--include-locales=en` (or expand it to the needed locales) and add `jdk.localedata`. |
 | App still huge after jlink | Most of the bulk is in third-party jars (~80 MB) and native DLLs (`ihmc-video-codecs`, JavaFX Prism), not the runtime. Stage 2 reduces only the JRE portion. |
 

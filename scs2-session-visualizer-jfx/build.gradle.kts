@@ -229,14 +229,16 @@ val mcapRepackMainClass = "us.ihmc.scs2.sessionVisualizer.jfx.session.mcap.MCAPR
 
 // Module list from docs/executable-plan.md §2.4. Discovered via `jdeps
 // --print-module-deps` and expanded with modules touched indirectly
-// (HTTPS, Swing interop, sun.misc.Unsafe).
+// (HTTPS, Swing interop, sun.misc.Unsafe, service-loader providers).
+// jdk.zipfs registers the "jar"/"zip" FileSystemProvider used by
+// YoGraphicFXResourceManager via FileSystems.newFileSystem(jar:...).
 val jlinkAddModules = listOf(
       "java.base", "java.compiler", "java.datatransfer", "java.desktop",
       "java.logging", "java.management", "java.naming", "java.net.http",
       "java.prefs", "java.rmi", "java.scripting", "java.security.jgss",
       "java.sql", "java.xml",
       "jdk.crypto.cryptoki", "jdk.crypto.ec", "jdk.localedata",
-      "jdk.unsupported", "jdk.unsupported.desktop",
+      "jdk.unsupported", "jdk.unsupported.desktop", "jdk.zipfs",
       "javafx.base", "javafx.controls", "javafx.fxml",
       "javafx.graphics", "javafx.swing"
 ).joinToString(",")
