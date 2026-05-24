@@ -17,7 +17,7 @@ task in `scs2-session-visualizer-jfx/build.gradle.kts`).
 | Build integration | New Gradle tasks added to `scs2-session-visualizer-jfx/build.gradle.kts` (mirroring `buildDebianPackage`) |
 | CI | Local-only in this plan; CI integration listed as a follow-up |
 | Icon | Pre-generated `scs-icon.ico` committed alongside existing PNG/SVG |
-| Installer version string | `17.0.32.1` (project version `17-0.32.1` with `-` → `.`) |
+| Installer version string | `0.32.1` (project version `17-0.32.1` with the `17-` Java-baseline prefix stripped — MSI only honours the first 3 numeric fields, so the 4th-field convention `17.0.32.1` would alias every patch release to the same upgrade-detection value) |
 | Default heap | `-Xmx8g` |
 | Code signing | Out of scope; listed as a follow-up |
 
@@ -124,7 +124,7 @@ If the filename differs (e.g. version bumped), use the actual name in the
 | Symbol | Value |
 |---|---|
 | Project version (Gradle) | `17-0.32.1` (from `group.gradle.properties`) |
-| Installer version | `17.0.32.1` (Windows requires dotted-numeric only) |
+| Installer version | `0.32.1` (strip the `17-` Java-baseline prefix; MSI only honours the first 3 numeric fields and would alias `17.0.32.1`, `17.0.32.2`, … to the same upgrade-detection value) |
 | Vendor | `IHMC` |
 | Application name | `SCS2SessionVisualizer` |
 | Main class (GUI) | `us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizer` |
@@ -207,7 +207,7 @@ All commands below are run from the repository root.
 jpackage ^
   --type app-image ^
   --name SCS2SessionVisualizer ^
-  --app-version 17.0.32.1 ^
+  --app-version 0.32.1 ^
   --vendor "IHMC" ^
   --description "Simulation Construction Set 2 - Session Visualizer" ^
   --copyright "IHMC" ^
@@ -233,7 +233,7 @@ as a zip.
 jpackage ^
   --type msi ^
   --name SCS2SessionVisualizer ^
-  --app-version 17.0.32.1 ^
+  --app-version 0.32.1 ^
   --vendor "IHMC" ^
   --description "Simulation Construction Set 2 - Session Visualizer" ^
   --copyright "IHMC" ^
@@ -253,7 +253,7 @@ jpackage ^
 ```
 
 Result:
-`scs2-session-visualizer-jfx\deployment\windows\msi\SCS2SessionVisualizer-17.0.32.1.msi`
+`scs2-session-visualizer-jfx\deployment\windows\msi\SCS2SessionVisualizer-0.32.1.msi`
 
 Notes on the WiX-specific options:
 - `--win-dir-chooser` lets the user pick install location (defaults
@@ -306,7 +306,7 @@ stage complete:
 |---|---|
 | `Error: Bundler "MSI Installer" (msi) failed to produce a bundle.` | WiX 3.x not on `PATH`. Add `C:\Program Files (x86)\WiX Toolset v3.11\bin` and reopen the shell. |
 | `Error: Invalid Option: [--win-upgrade-uuid]` | Using WiX 4.x instead of 3.x. Downgrade WiX. |
-| `Error: Version [17-0.32.1] contains invalid component` | Forgot to replace `-` with `.` in `--app-version`. Use `17.0.32.1`. |
+| `Error: Version [17-0.32.1] contains invalid component` | Forgot to strip the `17-` Java-baseline prefix from `--app-version`. Use `0.32.1`. |
 | App launches then closes silently | Run from `cmd.exe` to see the exit code; usually a missing native library (Stage 0.3 did not pick up the Windows-classifier jars — make sure `installDistLinux` was *not* run). |
 | YoGraphic dropdown is empty | `org.reflections` cannot see the application jars. Ensure all jars from `lib/` were copied into `--input` (the default behaviour) and no security sandboxing is blocking `getResources()`. |
 | `JavaFX runtime components are missing` error | A non-modular invocation problem: confirm `--main-class` points at a class that does **not** extend `javafx.application.Application` directly (this codebase's `SessionVisualizer` is a regular class — correct). |

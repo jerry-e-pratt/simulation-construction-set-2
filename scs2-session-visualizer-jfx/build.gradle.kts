@@ -220,9 +220,26 @@ val windowsStagingDir = "$windowsDeploymentRoot/staging"
 val windowsLaunchersDir = "$windowsDeploymentRoot/launchers"
 val windowsAppImageDir = "$windowsDeploymentRoot/app-image"
 val windowsMsiDir = "$windowsDeploymentRoot/msi"
+val windowsAppImageJlinkDir = "$windowsDeploymentRoot/app-image-jlink"
+val windowsMsiJlinkDir = "$windowsDeploymentRoot/msi-jlink"
+val jlinkRuntimeDir = "${project.projectDir}/build/jlink-runtime"
 val windowsIcon = "${project.projectDir}/src/main/resources/icons/scs-icon.ico"
 val windowsMainClass = "us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizer"
 val mcapRepackMainClass = "us.ihmc.scs2.sessionVisualizer.jfx.session.mcap.MCAPRepackApplication"
+
+// Module list from docs/executable-plan.md §2.4. Discovered via `jdeps
+// --print-module-deps` and expanded with modules touched indirectly
+// (HTTPS, Swing interop, sun.misc.Unsafe).
+val jlinkAddModules = listOf(
+      "java.base", "java.compiler", "java.datatransfer", "java.desktop",
+      "java.logging", "java.management", "java.naming", "java.net.http",
+      "java.prefs", "java.rmi", "java.scripting", "java.security.jgss",
+      "java.sql", "java.xml",
+      "jdk.crypto.cryptoki", "jdk.crypto.ec", "jdk.localedata",
+      "jdk.unsupported", "jdk.unsupported.desktop",
+      "javafx.base", "javafx.controls", "javafx.fxml",
+      "javafx.graphics", "javafx.swing"
+).joinToString(",")
 
 fun requireWindowsHost()
 {
@@ -236,7 +253,12 @@ fun requireJdk17Plus()
       throw GradleException("Windows packaging tasks require JDK 17 or newer (running on ${JavaVersion.current()}).")
 }
 
-fun windowsInstallerVersion() = ihmc.version.replace("-", ".")
+// MSI ProductVersion only honours the first three numeric components for
+// upgrade detection (the fourth is silently ignored). The IHMC Gradle
+// version is `<java-baseline>-<semver>` (e.g. `17-0.32.1`); we strip the
+// java-baseline prefix so the three significant fields land on the actual
+// semver (0.32.1) and patch-level releases differentiate correctly.
+fun windowsInstallerVersion() = ihmc.version.substringAfter("-")
 fun windowsMainJar() = "${project.name}-${ihmc.version}.jar"
 
 fun writeMcapLauncherProperties()
@@ -258,33 +280,62 @@ fun writeMcapLauncherProperties()
    )
 }
 
-// Resolve jpackage.exe from the running JDK's bin/ when available, otherwise
+// Resolve a JDK tool from the running JDK's bin/ when available, otherwise
 // fall back to PATH. Gives a clear "missing tool" error on JREs/JDKs that do
-// not ship jpackage (e.g. JBR), instead of an obscure ProcessBuilder failure.
-fun jpackageExecutable(): String
+// not ship the tool (e.g. JBR), instead of an obscure ProcessBuilder failure.
+fun jdkToolExecutable(toolName: String): String
 {
-   val javaHome = System.getProperty("java.home") ?: return "jpackage"
-   val candidate = File(javaHome, "bin/jpackage.exe")
-   return if (candidate.isFile) candidate.absolutePath else "jpackage"
+   val javaHome = System.getProperty("java.home") ?: return toolName
+   val candidate = File(javaHome, "bin/$toolName.exe")
+   return if (candidate.isFile) candidate.absolutePath else toolName
 }
 
-fun jpackageArgsCommon(type: String, dest: String): List<String> = listOf(
-      jpackageExecutable(),
-      "--type", type,
-      "--name", sessionVisualizerExecutableName,
-      "--app-version", windowsInstallerVersion(),
-      "--vendor", "IHMC",
-      "--description", "Simulation Construction Set 2 - Session Visualizer",
-      "--copyright", "IHMC",
-      "--input", "$windowsStagingDir/lib",
-      "--dest", dest,
-      "--main-jar", windowsMainJar(),
-      "--main-class", windowsMainClass,
-      "--icon", windowsIcon,
-      "--java-options", "-Dprism.vsync=false",
-      "--java-options", "-Xmx8g",
-      "--add-launcher", "$mcapRepackAppExecutableName=$windowsLaunchersDir/$mcapRepackAppExecutableName.properties"
-)
+fun jpackageExecutable() = jdkToolExecutable("jpackage")
+fun jlinkExecutable()    = jdkToolExecutable("jlink")
+
+// JavaFX jmods directory required by jlink. Pulled from the project property
+// `JAVAFX_JMODS_DIR` (-PJAVAFX_JMODS_DIR=… or ~/.gradle/gradle.properties);
+// falls back to the environment variable of the same name.
+fun resolveJavafxJmodsDir(): String
+{
+   val fromProp = findProperty("JAVAFX_JMODS_DIR")?.toString()?.takeIf { it.isNotBlank() }
+   val fromEnv  = System.getenv("JAVAFX_JMODS_DIR")?.takeIf { it.isNotBlank() }
+   val path = fromProp ?: fromEnv
+         ?: throw GradleException(
+               "JAVAFX_JMODS_DIR is not set. Download openjfx-17.0.8_windows-x64_bin-jmods.zip "
+                     + "from https://gluonhq.com/products/javafx/, unzip it, and pass "
+                     + "-PJAVAFX_JMODS_DIR=<path> or set the environment variable.")
+   if (!File(path, "javafx.base.jmod").isFile)
+      throw GradleException("JAVAFX_JMODS_DIR=$path does not contain javafx.base.jmod.")
+   return path
+}
+
+fun jpackageArgsCommon(type: String, dest: String, runtimeImage: String? = null): List<String>
+{
+   val args = mutableListOf(
+         jpackageExecutable(),
+         "--type", type,
+         "--name", sessionVisualizerExecutableName,
+         "--app-version", windowsInstallerVersion(),
+         "--vendor", "IHMC",
+         "--description", "Simulation Construction Set 2 - Session Visualizer",
+         "--copyright", "IHMC",
+         "--input", "$windowsStagingDir/lib",
+         "--dest", dest,
+         "--main-jar", windowsMainJar(),
+         "--main-class", windowsMainClass,
+         "--icon", windowsIcon,
+         "--java-options", "-Dprism.vsync=false",
+         "--java-options", "-Xmx8g"
+   )
+   if (runtimeImage != null)
+      args += listOf("--runtime-image", runtimeImage)
+   args += listOf(
+         "--add-launcher",
+         "$mcapRepackAppExecutableName=$windowsLaunchersDir/$mcapRepackAppExecutableName.properties"
+   )
+   return args
+}
 
 /**
  * Stages the installDist output for Windows packaging by copying it to a clean
@@ -355,4 +406,80 @@ tasks.register("packageWindowsMsi") {
 
 tasks.register("buildWindowsPackages") {
    dependsOn("packageWindowsAppImage", "packageWindowsMsi")
+}
+
+/**
+ * Builds a trimmed JRE image using jlink containing only the JDK and JavaFX
+ * modules required by the application. See docs/executable-plan.md §2.4.
+ */
+tasks.register("buildJlinkRuntime") {
+   doFirst {
+      requireWindowsHost()
+      requireJdk17Plus()
+   }
+
+   doLast {
+      val javafxJmods = resolveJavafxJmodsDir()
+      val javaHome = System.getProperty("java.home")
+            ?: throw GradleException("java.home system property is not set.")
+      val modulePath = "$javaHome/jmods${File.pathSeparator}$javafxJmods"
+
+      File(jlinkRuntimeDir).deleteRecursively()
+
+      ihmc.exec(ProcessBuilder(
+            jlinkExecutable(),
+            "--module-path", modulePath,
+            "--add-modules", jlinkAddModules,
+            "--strip-debug",
+            "--no-man-pages",
+            "--no-header-files",
+            "--compress=2",
+            "--include-locales=en",
+            "--output", jlinkRuntimeDir
+      ))
+   }
+}
+
+tasks.register("packageWindowsAppImageJlink") {
+   dependsOn("installDistWindows", "buildJlinkRuntime")
+
+   doFirst {
+      requireWindowsHost()
+      requireJdk17Plus()
+   }
+
+   doLast {
+      File(windowsAppImageJlinkDir).deleteRecursively()
+      File(windowsAppImageJlinkDir).mkdirs()
+      writeMcapLauncherProperties()
+      ihmc.exec(ProcessBuilder(
+            jpackageArgsCommon("app-image", windowsAppImageJlinkDir, jlinkRuntimeDir)))
+   }
+}
+
+tasks.register("packageWindowsMsiJlink") {
+   dependsOn("installDistWindows", "buildJlinkRuntime")
+
+   doFirst {
+      requireWindowsHost()
+      requireJdk17Plus()
+   }
+
+   doLast {
+      File(windowsMsiJlinkDir).deleteRecursively()
+      File(windowsMsiJlinkDir).mkdirs()
+      writeMcapLauncherProperties()
+      val args = jpackageArgsCommon("msi", windowsMsiJlinkDir, jlinkRuntimeDir) + listOf(
+            "--win-dir-chooser",
+            "--win-menu",
+            "--win-menu-group", "IHMC",
+            "--win-shortcut",
+            "--win-upgrade-uuid", windowsUpgradeUuid
+      )
+      ihmc.exec(ProcessBuilder(args))
+   }
+}
+
+tasks.register("buildWindowsPackagesJlink") {
+   dependsOn("packageWindowsAppImageJlink", "packageWindowsMsiJlink")
 }
