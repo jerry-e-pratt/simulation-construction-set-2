@@ -249,6 +249,8 @@ fun writeMcapLauncherProperties()
          main-jar=${windowsMainJar()}
          main-class=$mcapRepackMainClass
          win-console=true
+         win-menu=false
+         win-shortcut=false
          icon=${windowsIcon.replace("\\", "/")}
          java-options=-Dprism.vsync=false
          java-options=-Xmx2g
@@ -343,7 +345,7 @@ tasks.register("packageWindowsMsi") {
       val args = jpackageArgsCommon("msi", windowsMsiDir) + listOf(
             "--win-dir-chooser",
             "--win-menu",
-            "--win-menu-group", "SCS2",
+            "--win-menu-group", "IHMC",
             "--win-shortcut",
             "--win-upgrade-uuid", windowsUpgradeUuid
       )
