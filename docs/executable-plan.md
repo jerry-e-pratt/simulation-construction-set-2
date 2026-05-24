@@ -779,10 +779,14 @@ runtime is sufficient):
 These items are noted explicitly so they are not forgotten, but are
 **not** part of the initial Windows-executable work:
 
-1. **Code signing.** Sign `SCS2SessionVisualizer.exe`,
-   `MCAPRepackApplication.exe`, and the `.msi` with an Authenticode
-   certificate using `signtool.exe`. This eliminates the Windows
-   SmartScreen warning. Requires:
+1. **Code signing.** *Deferred (2026-05-24).* Signing was considered
+   after Stage 2 shipped and explicitly postponed — the "Unknown
+   publisher" UAC prompt is acceptable for current internal use, and
+   the certificate procurement / key-management work outweighs the
+   benefit right now. When picked up, sign
+   `SCS2SessionVisualizer.exe`, `MCAPRepackApplication.exe`, and the
+   `.msi` with an Authenticode certificate using `signtool.exe`. This
+   eliminates the Windows SmartScreen warning. Requires:
    - An EV or OV code-signing certificate.
    - `signtool.exe` from the Windows SDK on `PATH`.
    - A new Gradle task `signWindowsArtifacts` that runs after the
@@ -790,18 +794,23 @@ These items are noted explicitly so they are not forgotten, but are
    - A secure mechanism for the certificate (HSM / smart card /
      Azure Key Vault).
 
-2. **CI automation.** Extend
+2. **CI automation.** *Deferred (2026-05-24).* Local builds on a
+   Windows workstation are the canonical release path for the
+   foreseeable future; CI integration was considered after Stage 2
+   shipped and postponed. When picked up, extend
    `.github/workflows/main-gradleCI-build.yml` (or add a new release
    workflow) with a `windows-latest` job that:
    - Checks out the tag.
    - Sets up Temurin 17 via `actions/setup-java`.
-   - Downloads JavaFX 17.0.8 jmods from Gluon.
    - Installs WiX 3.x.
    - Runs `gradlew.bat :scs2-session-visualizer-jfx:buildWindowsPackagesJlink`.
    - Uploads the `.msi` as a release asset using
      `softprops/action-gh-release`.
-   Note that the existing CI workflow only runs tests on Ubuntu;
-   release packaging is currently manual on all platforms.
+   Note that `JAVAFX_JMODS_DIR` is no longer required — JavaFX ships
+   on the classpath via `installDistWindows` (see §2.4), so no Gluon
+   download step is needed in the workflow. The existing CI workflow
+   only runs tests on Ubuntu; release packaging is currently manual
+   on all platforms.
 
 3. **ARM64 (Windows on ARM).** Currently out of scope because:
    - JavaFX 17.0.8 does not ship Windows ARM64 native libraries.
