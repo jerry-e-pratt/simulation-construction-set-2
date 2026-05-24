@@ -13,7 +13,7 @@ task in `scs2-session-visualizer-jfx/build.gradle.kts`).
 | Plan document | Single file `docs/executable-plan.md` |
 | Deliverables | (a) Portable `app-image` folder, (b) `.msi` installer (WiX 3.x) |
 | Launchers | Both `SCS2SessionVisualizer.exe` and `MCAPRepackApplication.exe` |
-| Stage 1 status | Stage 1 (full JRE bundle) is a shipping artifact; Stage 2 (jlink-trimmed) is a size-reduction follow-up |
+| Stage 1 status | Stage 2 (`jlink`-trimmed runtime) is the **default release path**. Stage 1 is retained as a fallback that does not require the JavaFX jmods download. |
 | Build integration | New Gradle tasks added to `scs2-session-visualizer-jfx/build.gradle.kts` (mirroring `buildDebianPackage`) |
 | CI | Local-only in this plan; CI integration listed as a follow-up |
 | Icon | Pre-generated `scs-icon.ico` committed alongside existing PNG/SVG |
@@ -26,9 +26,9 @@ task in `scs2-session-visualizer-jfx/build.gradle.kts`).
 | Stage | Goal | Output |
 |---|---|---|
 | 0 | Prerequisites and one-time setup on the build machine | Tooling installed, icon committed |
-| 1 | Build a Windows distribution with a bundled full JRE using `jpackage` | `app-image` directory + `.msi` installer (~600 MB; dominated by `opencv-…-windows-x86_64-gpu.jar` at 138 MB and the bundled runtime at ~280 MB) |
-| 2 | Replace the bundled full JRE with a trimmed runtime built by `jlink` | Same artifacts, ~400–450 MB (only the runtime portion shrinks; native classifier jars stay) |
-| 3 | Promote both stages into reproducible Gradle tasks | `packageWindowsAppImage`, `packageWindowsMsi`, `buildJlinkRuntime` |
+| 1 | Build a Windows distribution with a bundled full JRE using `jpackage` | `app-image` directory (432 MB on disk) + `.msi` installer (347 MB compressed) |
+| 2 | Replace the bundled full JRE with a trimmed runtime built by `jlink` | Same artifacts, 368 MB on disk + 340 MB MSI (measured on 2026-05-24; see §2.8). The on-disk JRE shrinks from 119 MB to 55 MB; the MSI gain is modest because most of the installer is already-compressed jars dominated by the OpenCV GPU classifier at 132 MB. |
+| 3 | Promote both stages into reproducible Gradle tasks | `packageWindowsAppImage`, `packageWindowsMsi`, `buildJlinkRuntime`, `packageWindowsAppImageJlink`, `packageWindowsMsiJlink`, `buildWindowsPackages`, `buildWindowsPackagesJlink` |
 
 Each stage is independently runnable. Stage 1 must work end-to-end before
 Stage 2 is attempted.
@@ -366,15 +366,24 @@ optional download) before further `jlink` tuning.
 
 ## Stage 2 — `jlink`-trimmed runtime + `jpackage`
 
-Goal: replace the full JRE bundled by Stage 1 (≈170 MB) with a minimal
-runtime image containing only the JDK and JavaFX modules actually used
-by the application (≈60–90 MB). Total package size drops from ~300–400
-MB to ~150–220 MB.
+Goal: replace the full JRE bundled by Stage 1 with a minimal runtime
+image containing only the JDK and JavaFX modules actually used by the
+application. The runtime image shrinks from 119 MB to 55 MB on disk
+(measured 2026-05-24); the resulting MSI shrinks by ~7 MB after
+compression. Stage 2 is the recommended release path.
 
 This stage **does not** require source changes. All third-party
 dependencies stay on the classpath (none of them are JPMS-named modules
 and adding `module-info.java` to the SCS2 modules is out of scope —
 see the Follow-ups section).
+
+The originally projected MSI size of 150–220 MB assumed the JRE
+contributed proportionally to the compressed installer. In practice,
+the JRE compresses extremely well and the installer is dominated by
+already-compressed native-bearing jars (notably
+`opencv-…-windows-x86_64-gpu.jar` at 132 MB). Further size reduction
+beyond Stage 2 requires culling those native jars, not further `jlink`
+trimming — see §2.8 and the Follow-ups section.
 
 ### 2.1 Strategy
 
@@ -490,7 +499,10 @@ Repeat every check from Stage 1.5. In addition:
    dir /s /-c scs2-session-visualizer-jfx\deployment\windows\app-image
    dir /s /-c scs2-session-visualizer-jfx\deployment\windows\app-image-jlink
    ```
-   The `-jlink` variant should be at least 30% smaller.
+   The `-jlink` `app-image` should be ~60 MB smaller on disk
+   (the runtime portion drops from ~119 MB to ~55 MB). The MSI gain is
+   smaller (~7 MB on the measured 0.32.1 build) because the JRE
+   compresses very well and the installer is dominated by jars.
 2. **HTTPS feature**: trigger the version-check (Help → Check for
    updates, or whatever menu item invokes
    `okhttp` against GitHub). It must complete without an SSL handshake
@@ -514,6 +526,46 @@ Repeat every check from Stage 1.5. In addition:
 | `IllegalAccessError` from JavaFX Swing interop | Missing `jdk.unsupported.desktop`. |
 | Time-zone or formatting errors for non-en-US locales | Drop `--include-locales=en` (or expand it to the needed locales) and add `jdk.localedata`. |
 | App still huge after jlink | Most of the bulk is in third-party jars (~80 MB) and native DLLs (`ihmc-video-codecs`, JavaFX Prism), not the runtime. Stage 2 reduces only the JRE portion. |
+
+
+### 2.8 Stage 2 measurement (2026-05-24)
+
+Measured on the first end-to-end Stage 2 build (Temurin
+17.0.19+10 + JavaFX 17.0.8 jmods, project version `17-0.32.1`):
+
+| Artifact | Stage 1 | Stage 2 | Δ |
+|---|---|---|---|
+| `jlink` runtime image (on disk) | n/a (full JRE: 118.7 MB) | 54.8 MB | −64 MB |
+| `app/` (project jars) | 312.4 MB | 312.4 MB | 0 |
+| `app-image\SCS2SessionVisualizer\` total (on disk) | 432.0 MB | 368.0 MB | −64 MB |
+| `.msi` (compressed) | 347.3 MB | 340.2 MB | −7 MB |
+
+Why the MSI gain is small: jpackage already trims the bundled JDK to
+~119 MB in Stage 1 (it does not ship the full ~280 MB JDK install).
+The remaining 64 MB the `jlink` runtime saves on disk compresses to
+~7 MB inside the MSI because the JRE is high-entropy compressible
+content. The `app/` portion (312 MB of jars) is essentially
+incompressible inside an MSI — most jar entries are already deflated.
+
+The five largest contributors in `app/` (uncompressed) are all
+native-bearing jars:
+
+| Jar | Size |
+|---|---|
+| `opencv-4.10.0-1.5.11-20260107-ihmc-windows-x86_64-gpu.jar` | 132.3 MB |
+| `opencv-4.10.0-1.5.11-20260107-ihmc-windows-x86_64.jar` | 31.1 MB |
+| `openblas-0.3.28-1.5.11-windows-x86_64.jar` | 27.6 MB |
+| `ffmpeg-7.1-1.5.11-windows-x86_64.jar` | 24.4 MB |
+| `ihmc-pub-sub-1.2.1.jar` | 15.4 MB |
+
+Further MSI reduction beyond Stage 2 must target these jars (see
+Follow-ups). Only one SCS2 source file — `ZEDSVOVideoDataReader` —
+references OpenCV at runtime, and it uses the CPU `opencv_core` API
+exclusively. The CUDA-enabled `…-windows-x86_64-gpu.jar` is pulled in
+transitively by `ihmc-robot-data-logger → us.ihmc:opencv (+ natives)`
+and is a candidate for removal pending a runtime test against a ZED
+SVO recording.
+
 
 ---
 
@@ -637,17 +689,11 @@ Builds both Stage 2 deliverables.
 
 ### 3.4 Update `docs/Making-a-release.md`
 
-Once Stage 3 is in place, add a step to the release checklist between
-the existing step 7 (Debian) and step 8 (GitHub release):
-
-> 7b. **Windows**: on a Windows machine, run
-> `gradle :scs2-session-visualizer-jfx:buildWindowsPackages`. Upload the
-> `.msi` from
-> `scs2-session-visualizer-jfx/deployment/windows/msi/` and zip the
-> `app-image` folder for the GitHub release.
-
-This is a documentation-only change and should be done in the same
-commit that introduces the Gradle tasks.
+The release procedure invokes `buildWindowsPackagesJlink` (Stage 2) as
+the default Windows packaging target. The `.msi` for upload is taken
+from `scs2-session-visualizer-jfx/deployment/windows/msi-jlink/`. The
+Stage 1 task `buildWindowsPackages` is retained as a fallback for
+machines without the JavaFX jmods download.
 
 ---
 
@@ -674,7 +720,7 @@ runtime is sufficient):
 | Start Menu + desktop shortcut work | MSI only | MSI only |
 | Upgrade install replaces previous version | MSI only | MSI only |
 | Uninstall removes program files | MSI only | MSI only |
-| Bundle size meets target | ~300–400 MB | ~150–220 MB |
+| Bundle size in line with §2.8 measurement | ~347 MB MSI | ~340 MB MSI |
 
 ---
 
