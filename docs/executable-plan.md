@@ -600,10 +600,21 @@ SVO recording.
 
 An opt-in Gradle property `-PexcludeOpenCvGpu=true` extends the
 `installDistWindows` exclusion filter to drop the GPU classifier jar.
-The default is unchanged (the jar ships). Once a ZED SVO recording
-has been used to confirm that the CPU `opencv_core` natives are
-sufficient on the install target, the default can be flipped in a
-follow-up commit.
+The default is unchanged (the jar ships).
+
+**Decision (2026-05-24): the default stays `false`.** The Stage 2 MSI
+without the GPU exclusion is ~340 MB compressed / ~209 MB installed,
+which was accepted as the working baseline. Flipping the default
+would require validating against a real ZED SVO log on a machine
+with the ZED SDK installed (`ZEDSVOScrubber` silently skips SVO files
+when the SDK native is absent), and no such validation has been done.
+Static analysis still indicates the flip is safe — the only SCS2
+source file that imports OpenCV is `ZEDSVOVideoDataReader`, which
+uses the CPU `opencv_core` API exclusively, and no source file
+references `opencv_cuda*` — but until a ZED-bearing log has been
+played back end-to-end against a `-PexcludeOpenCvGpu=true` build,
+the opt-in flag is the safer ergonomic. Builders who want the
+smaller MSI can pass the flag explicitly; nothing else changes.
 
 
 ---
