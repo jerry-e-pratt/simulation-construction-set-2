@@ -26,8 +26,8 @@ task in `scs2-session-visualizer-jfx/build.gradle.kts`).
 | Stage | Goal | Output |
 |---|---|---|
 | 0 | Prerequisites and one-time setup on the build machine | Tooling installed, icon committed |
-| 1 | Build a Windows distribution with a bundled full JRE using `jpackage` | `app-image` directory + `.msi` installer (~300–400 MB) |
-| 2 | Replace the bundled full JRE with a trimmed runtime built by `jlink` | Same artifacts, ~150–220 MB |
+| 1 | Build a Windows distribution with a bundled full JRE using `jpackage` | `app-image` directory + `.msi` installer (~600 MB; dominated by `opencv-…-windows-x86_64-gpu.jar` at 138 MB and the bundled runtime at ~280 MB) |
+| 2 | Replace the bundled full JRE with a trimmed runtime built by `jlink` | Same artifacts, ~400–450 MB (only the runtime portion shrinks; native classifier jars stay) |
 | 3 | Promote both stages into reproducible Gradle tasks | `packageWindowsAppImage`, `packageWindowsMsi`, `buildJlinkRuntime` |
 
 Each stage is independently runnable. Stage 1 must work end-to-end before
@@ -50,6 +50,11 @@ packaging):
    jlink --version
    ```
    Set `JAVA_HOME` to the JDK 17 install root.
+
+   Note: the JetBrains Runtime (JBR, used by IntelliJ as
+   `C:\Program Files\JetBrains\…\jbr`) is **not** sufficient — it ships
+   without `jpackage` or `jlink`. If `JAVA_HOME` points at a JBR, point
+   it at a full JDK 17 install for packaging.
 
 2. **WiX Toolset 3.x** (3.11 or 3.14 — *not* 4.x; `jpackage` only supports
    the v3 series). Download from
@@ -164,7 +169,14 @@ properties file.
 ### 1.3 Launcher properties file
 
 Create the secondary launcher's property file under
-`scs2-session-visualizer-jfx/deployment/windows/launchers/`:
+`scs2-session-visualizer-jfx/deployment/windows/launchers/`.
+
+Note: `scs2-session-visualizer-jfx/.gitignore` excludes `deployment/`,
+mirroring the existing Debian flow whose `deployment/debian/` tree is
+also generated at build time and not committed. The Gradle task in
+Stage 3 therefore *materialises* this file at task execution time; in
+the manual-flow case below the file is created by hand and is not
+checked in.
 
 **`MCAPRepackApplication.properties`**:
 
@@ -300,6 +312,55 @@ stage complete:
 | `JavaFX runtime components are missing` error | A non-modular invocation problem: confirm `--main-class` points at a class that does **not** extend `javafx.application.Application` directly (this codebase's `SessionVisualizer` is a regular class — correct). |
 | Console window flashes on GUI launcher | Don't pass `--win-console` to the primary launcher; it is unset by default. |
 | No console on MCAP launcher | The `MCAPRepackApplication.properties` file is missing `win-console=true`, or the file path passed to `--add-launcher` is wrong. |
+
+### 1.7 Stage 1 smoke-test outcome (2026-05-24)
+
+The Stage 1 `app-image` flow was exercised manually on this machine
+before the Gradle integration in Stage 3 was written.
+
+Deviations from the spec used during the smoke test:
+- Packaging JDK was OpenJDK 25.0.2 (the only JDK with `jpackage` on the
+  machine), not the plan-target JDK 17. The bundled runtime was
+  therefore JDK 25.
+- `--type msi` was skipped (WiX 3.x was not installed).
+- Only the primary `SCS2SessionVisualizer` launcher was emitted;
+  `--add-launcher MCAPRepackApplication=…` was not exercised.
+- No interactive UI exercise — pure launch-stability check.
+
+Observations:
+- The `installDist` output contained the expected
+  `scs2-session-visualizer-jfx-17-0.32.1.jar` and the full Windows
+  classifier jar set (incl. `javafx-*-17.0.8-win.jar`,
+  `opencv-…-windows-x86_64.jar`, `openblas-…-windows-x86_64.jar`,
+  `ffmpeg-…-windows-x86_64.jar`).
+- The exclusion patterns in §3.2(2) above match every non-Windows jar
+  cleanly with no false positives.
+- `jpackage` produced
+  `SCS2SessionVisualizer.exe` (518 KB native launcher) +
+  `app/` (156 jars, 327 MB) +
+  `runtime/` (bundled JDK).
+- The launcher started and the process remained alive for 25+ seconds
+  before being killed externally — strong evidence that FXML loading,
+  `org.reflections` runtime scanning, JavaFX native lib loading, and
+  the OpenCV / FFmpeg / OpenBLAS native bindings all work from inside
+  the bundle.
+
+Largest contributors observed in `app/` (Stage 2 candidates if size
+becomes a concern):
+
+| Jar | Size |
+|---|---|
+| `opencv-…-windows-x86_64-gpu.jar` | 138 MB |
+| `opencv-…-windows-x86_64.jar` | 33 MB |
+| `openblas-…-windows-x86_64.jar` | 29 MB |
+| `ffmpeg-…-windows-x86_64.jar` | 26 MB |
+| `ihmc-pub-sub-1.2.1.jar` | 16 MB |
+| `zstd-jni-1.5.6-3.jar` | 6.7 MB |
+
+The OpenCV CUDA/GPU jar alone is larger than the bundled runtime
+saving Stage 2 would deliver; if installer size becomes a hard
+constraint it should be evaluated for omission (or split into an
+optional download) before further `jlink` tuning.
 
 ---
 
@@ -504,16 +565,22 @@ flow. Specification details:
    versions.
 
 2. **`installDistWindows`**: copies `build/install/scs2-session-visualizer-jfx/`
-   into `$windowsDeploymentRoot/staging/`, then deletes Linux-only
-   classifier jars from `lib/`:
+   into `$windowsDeploymentRoot/staging/`, then deletes non-Windows
+   classifier jars from `lib/`. Use these include patterns (verified
+   against the actual `installDist` output on 2026-05-24):
    ```
-   include("*-linux-*")
+   include("*-linux-*")     // ffmpeg-*-linux-x86_64.jar, opencv-*-linux-*.jar, netty-*-linux-*.jar
+   include("*-linux.jar")   // javafx-base-17.0.8-linux.jar (no trailing classifier segment)
    include("*-android-*")
    include("*-ios-*")
-   include("*-macosx-*")
-   include("*-osx-*")
+   include("*-macos-*")     // netty-resolver-dns-*-macos-*.jar
+   include("*-osx-*")       // *-osx-aarch_64.jar, *-osx-x86_64.jar
    ```
-   This mirrors `installDistLinux` but with the opposite exclusion set.
+   This mirrors `installDistLinux` but with the opposite platform set.
+   Note that the existing `installDistLinux` uses `*-macosx-*`, which
+   does **not** match the `-macos-` jars actually present; that is a
+   pre-existing minor bug in the Linux path that is out of scope here
+   but is fixed in the Windows path above.
 
 3. **`buildJlinkRuntime`**: reads `JAVAFX_JMODS_DIR` from the project
    property of the same name (set via `-PJAVAFX_JMODS_DIR=…` or
