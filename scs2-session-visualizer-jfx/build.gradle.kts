@@ -361,6 +361,13 @@ tasks.register("installDistWindows") {
          include("*-ios-*")
          include("*-macos-*")
          include("*-osx-*")
+         // Opt-in via -PexcludeOpenCvGpu=true. Drops the 132 MB CUDA-enabled
+         // OpenCV native classifier jar. The companion CPU classifier
+         // (`*-windows-x86_64.jar`) is retained. The only SCS2 code path that
+         // touches OpenCV is ZEDSVOVideoDataReader, which uses the CPU
+         // opencv_core API only. See docs/executable-plan.md §2.8.
+         if (findProperty("excludeOpenCvGpu")?.toString() == "true")
+            include("*-windows-x86_64-gpu*")
       }.forEach(File::delete)
    }
 }

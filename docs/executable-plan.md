@@ -566,6 +566,13 @@ transitively by `ihmc-robot-data-logger → us.ihmc:opencv (+ natives)`
 and is a candidate for removal pending a runtime test against a ZED
 SVO recording.
 
+An opt-in Gradle property `-PexcludeOpenCvGpu=true` extends the
+`installDistWindows` exclusion filter to drop the GPU classifier jar.
+The default is unchanged (the jar ships). Once a ZED SVO recording
+has been used to confirm that the CPU `opencv_core` natives are
+sufficient on the install target, the default can be flipped in a
+follow-up commit.
+
 
 ---
 
