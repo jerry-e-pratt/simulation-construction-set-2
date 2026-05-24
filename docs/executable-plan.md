@@ -237,7 +237,7 @@ jpackage ^
   --win-menu ^
   --win-menu-group "SCS2" ^
   --win-shortcut ^
-  --win-upgrade-uuid REPLACE-WITH-GENERATED-GUID
+  --win-upgrade-uuid f74c546b-1d1d-4114-9812-809b8eb1412c
 ```
 
 Result:
@@ -252,8 +252,9 @@ Notes on the WiX-specific options:
 - `--win-upgrade-uuid` is a **stable** UUID identifying this product
   across versions; future installers with the same UUID and a higher
   `--app-version` upgrade in place rather than install side-by-side.
-  Generate once with any GUID tool and commit the value into the build
-  script. **Do not change it between releases.**
+  The product's canonical value is
+  `f74c546b-1d1d-4114-9812-809b8eb1412c`. **Do not change it between
+  releases.**
 
 ### 1.5 Stage 1 validation checklist
 
@@ -492,13 +493,15 @@ flow. Specification details:
 1. **Top-level constants** (next to the existing
    `sessionVisualizerExecutableName`):
    ```kotlin
-   val windowsUpgradeUuid = "REPLACE-WITH-GENERATED-GUID"
+   val windowsUpgradeUuid = "f74c546b-1d1d-4114-9812-809b8eb1412c"
    val windowsInstallerVersion = ihmc.version.replace("-", ".")
    val windowsDeploymentRoot = "${project.projectDir}/deployment/windows"
    val jlinkRuntimeDir = "${project.buildDir}/jlink-runtime"
    ```
-   Generate the GUID once (e.g. PowerShell `[guid]::NewGuid()`) and
-   commit the literal value. Do not regenerate.
+   The `windowsUpgradeUuid` value above is the product's canonical
+   stable UUID. Do not regenerate or change it between releases — doing
+   so breaks in-place upgrades for users who installed previous
+   versions.
 
 2. **`installDistWindows`**: copies `build/install/scs2-session-visualizer-jfx/`
    into `$windowsDeploymentRoot/staging/`, then deletes Linux-only
