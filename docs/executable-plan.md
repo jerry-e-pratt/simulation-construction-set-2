@@ -447,8 +447,8 @@ charsets):
 
 ```bat
 jlink ^
-  --module-path "%JAVA_HOME%\jmods;%JAVAFX_JMODS_DIR%" ^
-  --add-modules java.base,java.compiler,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql,java.xml,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.unsupported,jdk.unsupported.desktop,jdk.zipfs,javafx.base,javafx.controls,javafx.fxml,javafx.graphics,javafx.swing ^
+  --module-path "%JAVA_HOME%\jmods" ^
+  --add-modules java.base,java.compiler,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql,java.xml,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.unsupported,jdk.unsupported.desktop,jdk.zipfs ^
   --strip-debug ^
   --no-man-pages ^
   --no-header-files ^
@@ -458,6 +458,21 @@ jlink ^
 ```
 
 Notes on module choices specific to this codebase:
+- **JavaFX modules are intentionally omitted** from the runtime image.
+  IHMC's distribution patches `javafx.scene.chart` by shipping
+  `FastAxisBase` (and related classes) inside a classpath jar
+  (`ihmc-javafx-extensions`). If `javafx.controls`/`javafx.graphics`
+  are baked into the boot module layer, the JVM gives those named
+  modules ownership of the `javafx.scene.chart` package and the
+  classpath patch is rejected at link time:
+  `NoClassDefFoundError: javafx/scene/chart/FastAxisBase` is thrown
+  the first time a chart is instantiated. The full JavaFX 17.0.8
+  runtime — classes **and** native DLLs — ships as classpath jars
+  (`javafx-base-17.0.8-win.jar`, `javafx-graphics-17.0.8-win.jar`,
+  etc.) already produced by `installDistWindows`, so removing them
+  from `jlink` does not lose any functionality.
+  As a side benefit, `JAVAFX_JMODS_DIR` is no longer required to
+  build the trimmed runtime.
 - `jdk.crypto.ec` and `jdk.crypto.cryptoki` are required for HTTPS used
   by the version-check feature (`okhttp` calling out to GitHub). Without
   them the version check fails silently on the first run.
@@ -525,8 +540,8 @@ Repeat every check from Stage 1.5. In addition:
 
 | Symptom | Likely cause and fix |
 |---|---|
-| `Module javafx.controls not found` during `jlink` | `JAVAFX_JMODS_DIR` not set or wrong path. Confirm it contains `javafx.base.jmod` etc. |
 | `Module java.base not found` | `%JAVA_HOME%\jmods` missing. JRE-only installations don't ship jmods — install the JDK. |
+| `NoClassDefFoundError: javafx/scene/chart/FastAxisBase` on first chart instantiation, primary window never opens | `javafx.*` modules were added to `jlink`. IHMC patches `javafx.scene.chart` from a classpath jar; baking JavaFX into the boot layer creates a split-package conflict the JVM rejects. Remove every `javafx.*` entry from `--add-modules` and let `installDistWindows` provide JavaFX on the classpath (`javafx-*-17.0.8-win.jar`). |
 | SSL handshake failures after install | Missing `jdk.crypto.ec` (or `jdk.crypto.cryptoki` for some endpoints) — add and rebuild. |
 | `NoClassDefFoundError: sun.misc.Unsafe` | Missing `jdk.unsupported`. |
 | `IllegalAccessError` from JavaFX Swing interop | Missing `jdk.unsupported.desktop`. |
@@ -540,19 +555,29 @@ Repeat every check from Stage 1.5. In addition:
 Measured on the first end-to-end Stage 2 build (Temurin
 17.0.19+10 + JavaFX 17.0.8 jmods, project version `17-0.32.1`):
 
-| Artifact | Stage 1 | Stage 2 | Δ |
-|---|---|---|---|
-| `jlink` runtime image (on disk) | n/a (full JRE: 118.7 MB) | 54.8 MB | −64 MB |
-| `app/` (project jars) | 312.4 MB | 312.4 MB | 0 |
-| `app-image\SCS2SessionVisualizer\` total (on disk) | 432.0 MB | 368.0 MB | −64 MB |
-| `.msi` (compressed) | 347.3 MB | 340.2 MB | −7 MB |
+| Artifact | Stage 1 | Stage 2 | Stage 2 + no-GPU + no-JavaFX-jmods | Δ vs. Stage 1 |
+|---|---|---|---|---|
+| `jlink` runtime image (on disk) | n/a (full JRE: 118.7 MB) | 54.8 MB | 41.3 MB | −77 MB |
+| `app/` (project jars, no GPU) | 312.4 MB | 312.4 MB | 180.1 MB | −132 MB |
+| `app-image\SCS2SessionVisualizer\` total (on disk) | 432.0 MB | 368.0 MB | 226.1 MB | −206 MB |
+| `.msi` (compressed) | 347.3 MB | 340.2 MB | **204.8 MB** | **−142 MB (−41%)** |
 
-Why the MSI gain is small: jpackage already trims the bundled JDK to
-~119 MB in Stage 1 (it does not ship the full ~280 MB JDK install).
-The remaining 64 MB the `jlink` runtime saves on disk compresses to
-~7 MB inside the MSI because the JRE is high-entropy compressible
-content. The `app/` portion (312 MB of jars) is essentially
-incompressible inside an MSI — most jar entries are already deflated.
+The cumulative final-stage drop (340.2 MB → 204.8 MB) combines two
+independent reductions:
+- `-PexcludeOpenCvGpu=true` strips the 132 MB CUDA OpenCV jar from
+  `app/` (§2.8 follow-up).
+- Removing the `javafx.*` modules from `--add-modules` (forced by
+  the `FastAxisBase` split-package fix, §2.7) shrinks the `jlink`
+  runtime from 54.8 MB to 41.3 MB — JavaFX classes were already on
+  the classpath, so they were being shipped twice.
+
+Why the runtime-only MSI gain is small: jpackage already trims the
+bundled JDK to ~119 MB in Stage 1 (it does not ship the full ~280 MB
+JDK install). The remaining 64 MB the `jlink` runtime saves on disk
+compresses to ~7 MB inside the MSI because the JRE is high-entropy
+compressible content. The `app/` portion (312 MB of jars) is
+essentially incompressible inside an MSI — most jar entries are
+already deflated.
 
 The five largest contributors in `app/` (uncompressed) are all
 native-bearing jars:

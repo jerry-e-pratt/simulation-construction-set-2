@@ -232,15 +232,23 @@ val mcapRepackMainClass = "us.ihmc.scs2.sessionVisualizer.jfx.session.mcap.MCAPR
 // (HTTPS, Swing interop, sun.misc.Unsafe, service-loader providers).
 // jdk.zipfs registers the "jar"/"zip" FileSystemProvider used by
 // YoGraphicFXResourceManager via FileSystems.newFileSystem(jar:...).
+//
+// JavaFX is intentionally NOT in this list. The IHMC distribution
+// patches `javafx.scene.chart` from a classpath jar
+// (ihmc-javafx-extensions adds `FastAxisBase`); baking the JavaFX
+// jmods into the boot module layer would give `javafx.controls`
+// ownership of that package and the JVM would reject the classpath
+// patch with NoClassDefFoundError. The full JavaFX 17.0.8 runtime
+// (including native DLLs) is shipped as classpath jars
+// (`javafx-*-17.0.8-win.jar`) alongside the application, matching
+// the Stage 1 layout.
 val jlinkAddModules = listOf(
       "java.base", "java.compiler", "java.datatransfer", "java.desktop",
       "java.logging", "java.management", "java.naming", "java.net.http",
       "java.prefs", "java.rmi", "java.scripting", "java.security.jgss",
       "java.sql", "java.xml",
       "jdk.crypto.cryptoki", "jdk.crypto.ec", "jdk.localedata",
-      "jdk.unsupported", "jdk.unsupported.desktop", "jdk.zipfs",
-      "javafx.base", "javafx.controls", "javafx.fxml",
-      "javafx.graphics", "javafx.swing"
+      "jdk.unsupported", "jdk.unsupported.desktop", "jdk.zipfs"
 ).joinToString(",")
 
 fun requireWindowsHost()
@@ -294,23 +302,6 @@ fun jdkToolExecutable(toolName: String): String
 
 fun jpackageExecutable() = jdkToolExecutable("jpackage")
 fun jlinkExecutable()    = jdkToolExecutable("jlink")
-
-// JavaFX jmods directory required by jlink. Pulled from the project property
-// `JAVAFX_JMODS_DIR` (-PJAVAFX_JMODS_DIR=… or ~/.gradle/gradle.properties);
-// falls back to the environment variable of the same name.
-fun resolveJavafxJmodsDir(): String
-{
-   val fromProp = findProperty("JAVAFX_JMODS_DIR")?.toString()?.takeIf { it.isNotBlank() }
-   val fromEnv  = System.getenv("JAVAFX_JMODS_DIR")?.takeIf { it.isNotBlank() }
-   val path = fromProp ?: fromEnv
-         ?: throw GradleException(
-               "JAVAFX_JMODS_DIR is not set. Download openjfx-17.0.8_windows-x64_bin-jmods.zip "
-                     + "from https://gluonhq.com/products/javafx/, unzip it, and pass "
-                     + "-PJAVAFX_JMODS_DIR=<path> or set the environment variable.")
-   if (!File(path, "javafx.base.jmod").isFile)
-      throw GradleException("JAVAFX_JMODS_DIR=$path does not contain javafx.base.jmod.")
-   return path
-}
 
 fun jpackageArgsCommon(type: String, dest: String, runtimeImage: String? = null): List<String>
 {
@@ -418,8 +409,9 @@ tasks.register("buildWindowsPackages") {
 }
 
 /**
- * Builds a trimmed JRE image using jlink containing only the JDK and JavaFX
- * modules required by the application. See docs/executable-plan.md §2.4.
+ * Builds a trimmed JRE image using jlink containing only the JDK modules
+ * required by the application. JavaFX is intentionally shipped as classpath
+ * jars (see jlinkAddModules comment). See docs/executable-plan.md §2.4.
  */
 tasks.register("buildJlinkRuntime") {
    doFirst {
@@ -428,10 +420,9 @@ tasks.register("buildJlinkRuntime") {
    }
 
    doLast {
-      val javafxJmods = resolveJavafxJmodsDir()
       val javaHome = System.getProperty("java.home")
             ?: throw GradleException("java.home system property is not set.")
-      val modulePath = "$javaHome/jmods${File.pathSeparator}$javafxJmods"
+      val modulePath = "$javaHome/jmods"
 
       File(jlinkRuntimeDir).deleteRecursively()
 
