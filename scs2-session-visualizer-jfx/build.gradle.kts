@@ -204,10 +204,153 @@ fun addVSyncLinuxHackForJavaFXApp(sourceFolder: String, javafxappname: String)
          #!/bin/bash
          # This is a workaround for a bug in JavaFX 17.0.1, disabling vsync to improve framerate with multiple windows.
          export __GL_SYNC_TO_VBLANK=0
-         
+
       """.trimIndent()
    )
 
    launchScriptFile.delete()
    launchScriptFile.writeText(originalScript)
+}
+
+// Stable upgrade UUID for the Windows MSI. Must never change across releases:
+// rotating it would orphan existing installations on user machines.
+val windowsUpgradeUuid = "f74c546b-1d1d-4114-9812-809b8eb1412c"
+val windowsDeploymentRoot = "${project.projectDir}/deployment/windows"
+val windowsStagingDir = "$windowsDeploymentRoot/staging"
+val windowsLaunchersDir = "$windowsDeploymentRoot/launchers"
+val windowsAppImageDir = "$windowsDeploymentRoot/app-image"
+val windowsMsiDir = "$windowsDeploymentRoot/msi"
+val windowsIcon = "${project.projectDir}/src/main/resources/icons/scs-icon.ico"
+val windowsMainClass = "us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizer"
+val mcapRepackMainClass = "us.ihmc.scs2.sessionVisualizer.jfx.session.mcap.MCAPRepackApplication"
+
+fun requireWindowsHost()
+{
+   if (!Os.isFamily(Os.FAMILY_WINDOWS))
+      throw GradleException("Windows packaging tasks only run on Windows.")
+}
+
+fun requireJdk17Plus()
+{
+   if (JavaVersion.current() < JavaVersion.VERSION_17)
+      throw GradleException("Windows packaging tasks require JDK 17 or newer (running on ${JavaVersion.current()}).")
+}
+
+fun windowsInstallerVersion() = ihmc.version.replace("-", ".")
+fun windowsMainJar() = "${project.name}-${ihmc.version}.jar"
+
+fun writeMcapLauncherProperties()
+{
+   File(windowsLaunchersDir).mkdirs()
+   // Properties-file format treats `\` as an escape character; use forward
+   // slashes (accepted by jpackage on Windows) for the icon path.
+   File("$windowsLaunchersDir/$mcapRepackAppExecutableName.properties").writeText(
+         """
+         main-jar=${windowsMainJar()}
+         main-class=$mcapRepackMainClass
+         win-console=true
+         icon=${windowsIcon.replace("\\", "/")}
+         java-options=-Dprism.vsync=false
+         java-options=-Xmx2g
+         """.trimIndent()
+   )
+}
+
+// Resolve jpackage.exe from the running JDK's bin/ when available, otherwise
+// fall back to PATH. Gives a clear "missing tool" error on JREs/JDKs that do
+// not ship jpackage (e.g. JBR), instead of an obscure ProcessBuilder failure.
+fun jpackageExecutable(): String
+{
+   val javaHome = System.getProperty("java.home") ?: return "jpackage"
+   val candidate = File(javaHome, "bin/jpackage.exe")
+   return if (candidate.isFile) candidate.absolutePath else "jpackage"
+}
+
+fun jpackageArgsCommon(type: String, dest: String): List<String> = listOf(
+      jpackageExecutable(),
+      "--type", type,
+      "--name", sessionVisualizerExecutableName,
+      "--app-version", windowsInstallerVersion(),
+      "--vendor", "IHMC",
+      "--description", "Simulation Construction Set 2 - Session Visualizer",
+      "--copyright", "IHMC",
+      "--input", "$windowsStagingDir/lib",
+      "--dest", dest,
+      "--main-jar", windowsMainJar(),
+      "--main-class", windowsMainClass,
+      "--icon", windowsIcon,
+      "--java-options", "-Dprism.vsync=false",
+      "--java-options", "-Xmx8g",
+      "--add-launcher", "$mcapRepackAppExecutableName=$windowsLaunchersDir/$mcapRepackAppExecutableName.properties"
+)
+
+/**
+ * Stages the installDist output for Windows packaging by copying it to a clean
+ * staging directory and removing native classifier jars for other platforms.
+ */
+tasks.register("installDistWindows") {
+   dependsOn("installDist")
+
+   doFirst {
+      requireWindowsHost()
+   }
+
+   doLast {
+      File(windowsStagingDir).deleteRecursively()
+      copy {
+         from("${project.projectDir}/build/install/scs2-session-visualizer-jfx/")
+         into(windowsStagingDir)
+      }
+      fileTree("$windowsStagingDir/lib").matching {
+         include("*-linux-*")
+         include("*-linux.jar")
+         include("*-android-*")
+         include("*-ios-*")
+         include("*-macos-*")
+         include("*-osx-*")
+      }.forEach(File::delete)
+   }
+}
+
+tasks.register("packageWindowsAppImage") {
+   dependsOn("installDistWindows")
+
+   doFirst {
+      requireWindowsHost()
+      requireJdk17Plus()
+   }
+
+   doLast {
+      File(windowsAppImageDir).deleteRecursively()
+      File(windowsAppImageDir).mkdirs()
+      writeMcapLauncherProperties()
+      ihmc.exec(ProcessBuilder(jpackageArgsCommon("app-image", windowsAppImageDir)))
+   }
+}
+
+tasks.register("packageWindowsMsi") {
+   dependsOn("installDistWindows")
+
+   doFirst {
+      requireWindowsHost()
+      requireJdk17Plus()
+   }
+
+   doLast {
+      File(windowsMsiDir).deleteRecursively()
+      File(windowsMsiDir).mkdirs()
+      writeMcapLauncherProperties()
+      val args = jpackageArgsCommon("msi", windowsMsiDir) + listOf(
+            "--win-dir-chooser",
+            "--win-menu",
+            "--win-menu-group", "SCS2",
+            "--win-shortcut",
+            "--win-upgrade-uuid", windowsUpgradeUuid
+      )
+      ihmc.exec(ProcessBuilder(args))
+   }
+}
+
+tasks.register("buildWindowsPackages") {
+   dependsOn("packageWindowsAppImage", "packageWindowsMsi")
 }
