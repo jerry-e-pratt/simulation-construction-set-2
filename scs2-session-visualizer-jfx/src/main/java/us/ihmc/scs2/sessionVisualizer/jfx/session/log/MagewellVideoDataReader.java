@@ -40,28 +40,14 @@ public class MagewellVideoDataReader implements VideoDataReader
       return magewellScrubber.getMagewellDemuxer().getImageWidth();
    }
 
-   /** Cap on consecutive non-video packets to skip per seek (audio/timecode interleaved with video). */
-   private static final int MAX_NON_VIDEO_FRAMES_TO_SKIP = 256;
-
    public void readVideoFrame(long queryRobotTimestamp)
    {
+      // The scrubber's contract: either an image-bearing Frame whose PTS is at or past the requested
+      // video timestamp, or null when the requested PTS matches the previous read (data rate exceeds
+      // video frame rate) or no image frame was found before EOF / the safety cap. In every null case
+      // we keep displaying the previously decoded frame.
       Frame nextFrame = magewellScrubber.readVideoFrame(queryRobotTimestamp);
-
-      // Scrubber returns null when the requested robot timestamp maps to the same video PTS as the last
-      // read (data sampling rate exceeds video frame rate); keep displaying the previously decoded frame.
       if (nextFrame == null)
-         return;
-
-      // The underlying FFmpegFrameGrabber.grabFrame() returns the next packet from any stream,
-      // so a multi-stream MP4 (video + audio + timecode) may yield non-image frames here.
-      int skipped = 0;
-      while (nextFrame != null && !hasImageData(nextFrame) && skipped < MAX_NON_VIDEO_FRAMES_TO_SKIP)
-      {
-         nextFrame = magewellScrubber.getMagewellDemuxer().getNextFrame();
-         skipped++;
-      }
-
-      if (nextFrame == null || !hasImageData(nextFrame))
          return;
 
       FrameData copyForWriting = imageBuffer.getCopyForWriting();
@@ -71,11 +57,6 @@ public class MagewellVideoDataReader implements VideoDataReader
       copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
       copyForWriting.frame = convertFrameToWritableImage(nextFrame, copyForWriting.frame);
       imageBuffer.commit();
-   }
-
-   private static boolean hasImageData(Frame frame)
-   {
-      return frame.image != null && frame.imageWidth > 0 && frame.imageHeight > 0;
    }
 
    /**

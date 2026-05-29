@@ -34,6 +34,14 @@ public class MagewellScrubber
     */
    private static final long FORWARD_PLAYBACK_TOLERANCE_US = 1_000_000L;
 
+   /**
+    * Safety cap on packets consumed by a single {@link #readVideoFrame(long)} call. Magewell MP4s
+    * interleave audio packets (~94/s) with video frames (~30/s), so a forward catch-up of one second
+    * may require on the order of a hundred packets; this bound prevents pathological loops on broken
+    * streams while comfortably covering legitimate forward jumps inside the tolerance window.
+    */
+   private static final int MAX_PACKETS_PER_FRAME_READ = 1024;
+
    public MagewellScrubber(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
       this.camera = camera;
@@ -83,20 +91,46 @@ public class MagewellScrubber
       if (currentVideoTimestamp == lastReadVideoTimestamp)
          return null;
 
-      long forwardDelta = currentVideoTimestamp - lastReadVideoTimestamp;
-      Frame frame;
-      if (lastReadVideoTimestamp != Long.MIN_VALUE && forwardDelta > 0 && forwardDelta <= FORWARD_PLAYBACK_TOLERANCE_US)
-      {
-         frame = magewellDemuxer.getNextFrame();
-      }
-      else
+      // Seek-vs-stream is decided from the demuxer's actual position. Comparing two consecutive
+      // *requested* PTS values let the decoder fall arbitrarily far behind on forward scrubs inside
+      // the tolerance window, so play and scrub landed on different frames for the same robot tick.
+      long demuxerPTS = magewellDemuxer.getCurrentPTS();
+      long forwardDelta = currentVideoTimestamp - demuxerPTS;
+      if (lastReadVideoTimestamp == Long.MIN_VALUE || forwardDelta < 0 || forwardDelta > FORWARD_PLAYBACK_TOLERANCE_US)
       {
          magewellDemuxer.seekToPTS(currentVideoTimestamp);
-         frame = magewellDemuxer.getNextFrame();
       }
+
+      Frame frame = advanceToVideoFrameAtOrAfter(currentVideoTimestamp);
 
       lastReadVideoTimestamp = currentVideoTimestamp;
       return frame;
+   }
+
+   /**
+    * Advances the demuxer until it yields an image-bearing {@link Frame} whose PTS is at or past
+    * {@code targetPTS}. Interleaved non-video packets (audio, timecode) are skipped and video
+    * frames still behind the target are stepped past, so the returned frame is the first video
+    * frame that covers the requested PTS. Returns the most recent image frame seen on EOF, or
+    * {@code null} when no image frame was encountered before EOF or the safety cap.
+    */
+   private Frame advanceToVideoFrameAtOrAfter(long targetPTS)
+   {
+      Frame lastImageFrame = null;
+      int packetsRead = 0;
+      while (packetsRead < MAX_PACKETS_PER_FRAME_READ)
+      {
+         Frame frame = magewellDemuxer.getNextFrame();
+         if (frame == null)
+            break;
+         packetsRead++;
+         if (frame.image == null || frame.imageWidth <= 0 || frame.imageHeight <= 0)
+            continue;
+         lastImageFrame = frame;
+         if (frame.timestamp >= targetPTS)
+            return frame;
+      }
+      return lastImageFrame;
    }
 
    public void cropVideo(File outputFile, File timestampFile, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException
