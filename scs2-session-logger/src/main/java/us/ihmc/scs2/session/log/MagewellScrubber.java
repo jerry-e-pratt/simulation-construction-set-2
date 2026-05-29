@@ -30,9 +30,11 @@ public class MagewellScrubber
     * Tolerance (in microseconds) within which we advance the decoder by streaming frames instead of seeking.
     * FFmpegFrameGrabber.setTimestamp() seeks to the nearest preceding keyframe and re-decodes the GOP, which
     * is prohibitively expensive when called for every playback frame; for sequential forward playback we
-    * instead let the decoder progress naturally via grabFrame().
+    * instead let the decoder progress naturally via grabFrame(). 250 ms ≈ 7 frames at 30 fps, which keeps
+    * normal playback and modest fast-forward on the streaming path while forwarding larger scrub jumps to
+    * a fresh keyframe seek.
     */
-   private static final long FORWARD_PLAYBACK_TOLERANCE_US = 1_000_000L;
+   private static final long FORWARD_PLAYBACK_TOLERANCE_US = 250_000L;
 
    /**
     * Safety cap on packets consumed by a single {@link #readVideoFrame(long)} call. Magewell MP4s
