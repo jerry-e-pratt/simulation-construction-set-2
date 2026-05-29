@@ -23,6 +23,16 @@ public class MagewellScrubber
    private final Camera camera;
    private long currentVideoTimestamp;
    private long currentRobotTimestamp;
+   private long lastReadVideoTimestamp = Long.MIN_VALUE;
+   private long lastSeenDelay;
+
+   /**
+    * Tolerance (in microseconds) within which we advance the decoder by streaming frames instead of seeking.
+    * FFmpegFrameGrabber.setTimestamp() seeks to the nearest preceding keyframe and re-decodes the GOP, which
+    * is prohibitively expensive when called for every playback frame; for sequential forward playback we
+    * instead let the decoder progress naturally via grabFrame().
+    */
+   private static final long FORWARD_PLAYBACK_TOLERANCE_US = 1_000_000L;
 
    public MagewellScrubber(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
@@ -60,12 +70,33 @@ public class MagewellScrubber
 
    public Frame readVideoFrame(long queryRobotTimestamp)
    {
+      long currentDelay = timestampScrubber.getDelay();
+      if (currentDelay != lastSeenDelay)
+      {
+         lastReadVideoTimestamp = Long.MIN_VALUE;
+         lastSeenDelay = currentDelay;
+      }
+
       currentVideoTimestamp = timestampScrubber.getVideoTimestampFromRobotTimestamp(queryRobotTimestamp);
       currentRobotTimestamp = timestampScrubber.getCurrentRobotTimestamp();
 
-      magewellDemuxer.seekToPTS(currentVideoTimestamp);
+      if (currentVideoTimestamp == lastReadVideoTimestamp)
+         return null;
 
-      return magewellDemuxer.getNextFrame();
+      long forwardDelta = currentVideoTimestamp - lastReadVideoTimestamp;
+      Frame frame;
+      if (lastReadVideoTimestamp != Long.MIN_VALUE && forwardDelta > 0 && forwardDelta <= FORWARD_PLAYBACK_TOLERANCE_US)
+      {
+         frame = magewellDemuxer.getNextFrame();
+      }
+      else
+      {
+         magewellDemuxer.seekToPTS(currentVideoTimestamp);
+         frame = magewellDemuxer.getNextFrame();
+      }
+
+      lastReadVideoTimestamp = currentVideoTimestamp;
+      return frame;
    }
 
    public void cropVideo(File outputFile, File timestampFile, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException

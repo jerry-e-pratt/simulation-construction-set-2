@@ -41,6 +41,11 @@ public class MagewellVideoDataReader implements VideoDataReader
    {
       Frame nextFrame = magewellScrubber.readVideoFrame(queryRobotTimestamp);
 
+      // Scrubber returns null when the requested robot timestamp maps to the same video PTS as the last
+      // read (data sampling rate exceeds video frame rate); keep displaying the previously decoded frame.
+      if (nextFrame == null)
+         return;
+
       // The underlying FFmpegFrameGrabber.grabFrame() returns the next packet from any stream,
       // so a multi-stream MP4 (video + audio + timecode) may yield non-image frames here.
       int skipped = 0;
