@@ -7,6 +7,7 @@
 /pit-reports
 /install
 /src/*/bin
+/docs/agent_plans
 
 # Top level directories in sub-projects
 */target

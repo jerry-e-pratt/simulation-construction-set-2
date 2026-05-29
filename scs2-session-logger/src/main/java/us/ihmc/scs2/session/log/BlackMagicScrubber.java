@@ -122,6 +122,11 @@ public class BlackMagicScrubber
       return timestampScrubber.getCurrentIndex();
    }
 
+   public TimestampScrubber getTimestampScrubber()
+   {
+      return timestampScrubber;
+   }
+
    public boolean replacedRobotTimestampsContainsIndex(int index)
    {
       return timestampScrubber.getReplacedRobotTimestampIndex(index);

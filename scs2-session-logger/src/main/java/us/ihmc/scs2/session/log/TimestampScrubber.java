@@ -5,9 +5,11 @@ import gnu.trove.list.array.TLongArrayList;
 import us.ihmc.euclid.tools.EuclidCoreTools;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,6 +19,7 @@ public class TimestampScrubber
 {
    private final boolean hasTimebase;
    private final boolean interlaced;
+   private final File timestampFile;
    private long[] robotTimestamps;
    private long[] videoTimestamps;
    // video information is needed when data is separated into multiple files, for example svo2s
@@ -38,8 +41,19 @@ public class TimestampScrubber
    {
       this.hasTimebase = hasTimebase;
       this.interlaced = interlaced;
+      this.timestampFile = timestampFile;
 
       parseTimestampData(timestampFile);
+   }
+
+   public File getTimestampFile()
+   {
+      return timestampFile;
+   }
+
+   public boolean hasTimebase()
+   {
+      return hasTimebase;
    }
 
    private void parseTimestampData(File timestampFile) throws IOException
@@ -312,5 +326,60 @@ public class TimestampScrubber
    public void setDelay(long delay)
    {
       this.delay = delay;
+   }
+
+   /**
+    * Writes a copy of {@code source} to {@code target} with every robot timestamp column shifted by
+    * {@code -bakedOffset}. After re-parsing {@code target} with {@code delay == 0}, the
+    * robot-to-video mapping matches the source mapping that was obtained with {@code delay == bakedOffset}.
+    * The optional timebase header (numerator/denominator) and the optional filename column are
+    * preserved verbatim.
+    *
+    * @param source       the existing Timestamps.dat file to read from.
+    * @param target       the file to write the shifted copy to (overwritten if it exists).
+    * @param bakedOffset  the delay value (in robot-timestamp units, typically ns) to bake in.
+    * @param hasTimebase  whether the source file starts with two header lines (numerator, denominator).
+    */
+   public static void writeShifted(File source, File target, long bakedOffset, boolean hasTimebase) throws IOException
+   {
+      try (BufferedReader reader = new BufferedReader(new FileReader(source));
+           BufferedWriter writer = new BufferedWriter(new FileWriter(target)))
+      {
+         if (hasTimebase)
+         {
+            String numerator = reader.readLine();
+            if (numerator == null)
+               throw new IOException("Cannot read numerator from " + source);
+            String denominator = reader.readLine();
+            if (denominator == null)
+               throw new IOException("Cannot read denominator from " + source);
+            writer.write(numerator);
+            writer.write('\n');
+            writer.write(denominator);
+            writer.write('\n');
+         }
+
+         String line;
+         while ((line = reader.readLine()) != null)
+         {
+            if (line.isEmpty())
+            {
+               writer.write('\n');
+               continue;
+            }
+            String[] stamps = line.split("\\s");
+            long robotStamp = Long.parseLong(stamps[0]);
+            long shiftedRobotStamp = robotStamp - bakedOffset;
+
+            StringBuilder sb = new StringBuilder();
+            sb.append(shiftedRobotStamp);
+            for (int i = 1; i < stamps.length; i++)
+            {
+               sb.append(' ').append(stamps[i]);
+            }
+            writer.write(sb.toString());
+            writer.write('\n');
+         }
+      }
    }
 }
