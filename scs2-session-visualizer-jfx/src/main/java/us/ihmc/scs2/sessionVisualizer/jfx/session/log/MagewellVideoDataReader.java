@@ -8,6 +8,7 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.image.WritablePixelFormat;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.JavaFXFrameConverter;
+import us.ihmc.concurrent.ConcurrentCopier;
 import us.ihmc.robotDataLogger.Camera;
 import us.ihmc.scs2.session.log.MagewellScrubber;
 import us.ihmc.scs2.session.log.ProgressConsumer;
@@ -19,7 +20,7 @@ import java.io.IOException;
 public class MagewellVideoDataReader implements VideoDataReader
 {
    private final MagewellScrubber magewellScrubber;
-   private final FrameData frameData = new FrameData();
+   private final ConcurrentCopier<FrameData> imageBuffer = new ConcurrentCopier<>(FrameData::new);
    private static final WritablePixelFormat<java.nio.IntBuffer> ARGB_PIXEL_FORMAT = PixelFormat.getIntArgbInstance();
    private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
    private int[] pixelBuffer = null;
@@ -60,16 +61,16 @@ public class MagewellVideoDataReader implements VideoDataReader
          skipped++;
       }
 
-      // This is a copy that can be shown in the video view to debug timestamp issues
-      {
-         FrameData copyForWriting = frameData;
-         copyForWriting.queryRobotTimestamp = queryRobotTimestamp;
-         copyForWriting.currentRobotTimestamp = magewellScrubber.getCurrentRobotTimestamp();
-         copyForWriting.currentVideoTimestamp = magewellScrubber.getCurrentVideoTimestamp();
-         copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
-      }
+      if (nextFrame == null || !hasImageData(nextFrame))
+         return;
 
-      frameData.frame = convertFrameToWritableImage(nextFrame);
+      FrameData copyForWriting = imageBuffer.getCopyForWriting();
+      copyForWriting.queryRobotTimestamp = queryRobotTimestamp;
+      copyForWriting.currentRobotTimestamp = magewellScrubber.getCurrentRobotTimestamp();
+      copyForWriting.currentVideoTimestamp = magewellScrubber.getCurrentVideoTimestamp();
+      copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
+      copyForWriting.frame = convertFrameToWritableImage(nextFrame, copyForWriting.frame);
+      imageBuffer.commit();
    }
 
    private static boolean hasImageData(Frame frame)
@@ -78,24 +79,23 @@ public class MagewellVideoDataReader implements VideoDataReader
    }
 
    /**
-    * This class converts a {@link Frame} to a {@link WritableImage} in order to be displayed correctly in JavaFX.
+    * Converts a {@link Frame} to a {@link WritableImage} for display in JavaFX, reusing the provided
+    * {@code reusable} image when its dimensions match the converted frame.
     *
-    * @param frameToConvert is the next frame we want to visualize so we convert it to be compatible with JavaFX
-    * @return {@link WritableImage}
+    * @param frameToConvert the next frame to visualize.
+    * @param reusable       the previously returned image for this buffer slot, or {@code null} on first use.
+    * @return the populated {@link WritableImage}; {@code reusable} when dimensions match, otherwise a new instance.
     */
-   public WritableImage convertFrameToWritableImage(Frame frameToConvert)
+   public WritableImage convertFrameToWritableImage(Frame frameToConvert, WritableImage reusable)
    {
-      Image currentImage;
-
-      if (frameToConvert == null || !hasImageData(frameToConvert))
-      {
-         return null;
-      }
-
-      currentImage = frameConverter.convert(frameToConvert);
+      Image currentImage = frameConverter.convert(frameToConvert);
       int width = (int) currentImage.getWidth();
       int height = (int) currentImage.getHeight();
-      WritableImage writableImage = new WritableImage(width, height);
+
+      WritableImage writableImage = reusable;
+      if (writableImage == null || (int) writableImage.getWidth() != width || (int) writableImage.getHeight() != height)
+         writableImage = new WritableImage(width, height);
+
       PixelReader pixelReader = currentImage.getPixelReader();
       PixelWriter pixelWriter = writableImage.getPixelWriter();
 
@@ -126,7 +126,7 @@ public class MagewellVideoDataReader implements VideoDataReader
 
    public FrameData pollCurrentFrame()
    {
-      return frameData;
+      return imageBuffer.getCopyForReading();
    }
 
    public int getCurrentIndex()
