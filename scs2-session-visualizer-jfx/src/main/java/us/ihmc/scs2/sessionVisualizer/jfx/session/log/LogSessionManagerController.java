@@ -19,8 +19,10 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.FlowPane;
@@ -41,6 +43,9 @@ import us.ihmc.scs2.session.log.ChildLogData;
 import us.ihmc.scs2.session.log.ChildLogSynchronization;
 import us.ihmc.scs2.session.log.LogDataReader;
 import us.ihmc.scs2.session.log.LogSession;
+import us.ihmc.scs2.session.log.TimestampScrubber;
+import us.ihmc.scs2.sharedMemory.BufferSample;
+import us.ihmc.scs2.sharedMemory.LinkedYoLong;
 import us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizerIOTools;
 import us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizerTopics;
 import us.ihmc.scs2.sessionVisualizer.jfx.controllers.SessionVariableFilterPaneController;
@@ -55,11 +60,15 @@ import us.ihmc.yoVariables.variable.YoVariable;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.ToLongFunction;
@@ -101,6 +110,17 @@ public class LogSessionManagerController implements SessionControlsController
    @FXML
    private Pane additionalLogWeightContainer;
 
+   @FXML
+   private TitledPane videoOffsetTitledPane;
+   @FXML
+   private Label videoOffsetValueLabel, videoOffsetStatusLabel;
+   @FXML
+   private ToggleGroup videoShiftDirectionToggleGroup;
+   @FXML
+   private RadioButton videoLeftDataRightRadio, videoRightDataLeftRadio;
+   @FXML
+   private Button adjustVideoOffsetButton, writeVideoOffsetButton, resetVideoOffsetButton;
+
    private enum OutputFormat
    {
       Default, MATLAB, CSV;
@@ -121,6 +141,12 @@ public class LogSessionManagerController implements SessionControlsController
    private Stage stage;
    private SessionVisualizerTopics topics;
    private JavaFXMessager messager;
+
+   private final AtomicReference<int[]> currentKeyFramesRef = new AtomicReference<>(new int[0]);
+   private final AtomicReference<BufferSample<long[]>> latestTimestampSampleRef = new AtomicReference<>(null);
+   private MultiVideoDataReader currentMultiVideoReader;
+   private LinkedYoLong linkedTimestamp;
+   private Future<?> timestampPullerTask;
 
    @Override
    public void initialize(SessionVisualizerToolkit toolkit)
@@ -390,6 +416,13 @@ public class LogSessionManagerController implements SessionControlsController
                                                                          stage.sizeToScene();
                                                                       });
 
+      messager.addFXTopicListener(topics.getCurrentKeyFrames(), kfs ->
+      {
+         currentKeyFramesRef.set(kfs == null ? new int[0] : kfs);
+         updateVideoOffsetButtonStates();
+      });
+      messager.submitMessage(topics.getRequestCurrentKeyFrames(), new Object());
+
       stage.setScene(new Scene(mainPane));
       stage.setTitle("Log session controls");
       stage.getIcons().add(SessionVisualizerIOTools.LOG_SESSION_IMAGE);
@@ -424,6 +457,9 @@ public class LogSessionManagerController implements SessionControlsController
       thumbnailsTitledPane.setText(logHasVideos ? "Logged videos" : "No video");
       thumbnailsTitledPane.setExpanded(logHasVideos);
       thumbnailsTitledPane.setDisable(!logHasVideos);
+
+      setupVideoOffsetControls(newValue, multiReader, logHasVideos && hasAdjustableScrubber(multiReader));
+
       JavaFXMissingTools.runNFramesLater(5, () -> stage.sizeToScene());
       JavaFXMissingTools.runNFramesLater(6, () -> stage.toFront());
 
@@ -449,6 +485,116 @@ public class LogSessionManagerController implements SessionControlsController
       logCropperProperty.set(null);
       addedLogCropperProperty.get().clear();
       additionalLogWeightContainer.getChildren().clear();
+      teardownVideoOffsetControls();
+   }
+
+   private static boolean hasAdjustableScrubber(MultiVideoDataReader multiReader)
+   {
+      for (VideoDataReader reader : multiReader.getReaders())
+      {
+         TimestampScrubber scrubber = reader.getTimestampScrubber();
+         if (scrubber != null && scrubber.getTimestampFile() != null)
+            return true;
+      }
+      return false;
+   }
+
+   private void setupVideoOffsetControls(LogSession logSession, MultiVideoDataReader multiReader, boolean enable)
+   {
+      teardownVideoOffsetControls();
+
+      currentMultiVideoReader = multiReader;
+      videoOffsetTitledPane.setDisable(!enable);
+      videoOffsetTitledPane.setExpanded(enable);
+      videoOffsetStatusLabel.setText("");
+      if (!enable)
+      {
+         videoOffsetValueLabel.setText("0.000 s");
+         updateVideoOffsetButtonStates();
+         return;
+      }
+
+      linkedTimestamp = logSession.getLinkedYoVariableFactory().newLinkedYoVariable(logSession.getLogDataReader().getTimestamp(), this);
+      linkedTimestamp.requestEntireBuffer();
+
+      timestampPullerTask = backgroundExecutorManager.scheduleTaskInBackground(() ->
+                                                                               {
+                                                                                  if (linkedTimestamp == null)
+                                                                                     return;
+                                                                                  linkedTimestamp.pull();
+                                                                                  BufferSample<long[]> sample = linkedTimestamp.pollRequestedBufferSample();
+                                                                                  if (sample != null)
+                                                                                     latestTimestampSampleRef.set(sample);
+                                                                                  linkedTimestamp.requestEntireBuffer();
+                                                                               }, 0, 200, TimeUnit.MILLISECONDS);
+
+      refreshVideoOffsetLabel();
+      updateVideoOffsetButtonStates();
+   }
+
+   private void teardownVideoOffsetControls()
+   {
+      if (timestampPullerTask != null)
+      {
+         timestampPullerTask.cancel(false);
+         timestampPullerTask = null;
+      }
+      if (linkedTimestamp != null)
+      {
+         linkedTimestamp.removeUser(this);
+         linkedTimestamp = null;
+      }
+      latestTimestampSampleRef.set(null);
+      currentMultiVideoReader = null;
+      videoOffsetTitledPane.setDisable(true);
+      videoOffsetTitledPane.setExpanded(false);
+      videoOffsetValueLabel.setText("0.000 s");
+      videoOffsetStatusLabel.setText("");
+      updateVideoOffsetButtonStates();
+   }
+
+   private void updateVideoOffsetButtonStates()
+   {
+      boolean hasReader = currentMultiVideoReader != null && hasAdjustableScrubber(currentMultiVideoReader);
+      boolean hasTwoKeyFrames = currentKeyFramesRef.get().length == 2;
+      if (adjustVideoOffsetButton != null)
+         adjustVideoOffsetButton.setDisable(!hasReader || !hasTwoKeyFrames);
+      if (writeVideoOffsetButton != null)
+         writeVideoOffsetButton.setDisable(!hasReader || !hasNonZeroDelay());
+      if (resetVideoOffsetButton != null)
+         resetVideoOffsetButton.setDisable(!hasReader || !hasNonZeroDelay());
+   }
+
+   private boolean hasNonZeroDelay()
+   {
+      if (currentMultiVideoReader == null)
+         return false;
+      for (VideoDataReader reader : currentMultiVideoReader.getReaders())
+      {
+         TimestampScrubber scrubber = reader.getTimestampScrubber();
+         if (scrubber != null && scrubber.getDelay() != 0L)
+            return true;
+      }
+      return false;
+   }
+
+   private void refreshVideoOffsetLabel()
+   {
+      long delayNs = primaryScrubberDelayNs();
+      videoOffsetValueLabel.setText(String.format("%.3f s", delayNs / 1.0e9));
+   }
+
+   private long primaryScrubberDelayNs()
+   {
+      if (currentMultiVideoReader == null)
+         return 0L;
+      for (VideoDataReader reader : currentMultiVideoReader.getReaders())
+      {
+         TimestampScrubber scrubber = reader.getTimestampScrubber();
+         if (scrubber != null)
+            return scrubber.getDelay();
+      }
+      return 0L;
    }
 
    public void openLogFile()
@@ -612,6 +758,125 @@ public class LogSessionManagerController implements SessionControlsController
             e.printStackTrace();
          }
       });
+   }
+
+   @FXML
+   public void adjustVideoOffset()
+   {
+      LogSession session = activeSessionProperty.get();
+      if (session == null || currentMultiVideoReader == null)
+         return;
+
+      int[] keyFrames = currentKeyFramesRef.get();
+      if (keyFrames.length != 2)
+      {
+         videoOffsetStatusLabel.setText("Set exactly two keyframes on the timeline to adjust the offset.");
+         return;
+      }
+
+      BufferSample<long[]> sample = latestTimestampSampleRef.get();
+      if (sample == null)
+      {
+         if (linkedTimestamp != null)
+            linkedTimestamp.requestEntireBuffer();
+         videoOffsetStatusLabel.setText("Timestamp data not yet available; please try again in a moment.");
+         return;
+      }
+
+      long[] timestamps = sample.getSample();
+      int bufferSize = sample.getBufferProperties().getSize();
+      int idxA = keyFrames[0];
+      int idxB = keyFrames[1];
+      if (idxA < 0 || idxB < 0 || idxA >= bufferSize || idxB >= bufferSize)
+      {
+         videoOffsetStatusLabel.setText("Keyframe indices out of buffer range.");
+         return;
+      }
+
+      long tA = timestamps[idxA];
+      long tB = timestamps[idxB];
+      long delta = Math.abs(tB - tA);
+      long signedDelta = videoLeftDataRightRadio.isSelected() ? delta : -delta;
+
+      for (VideoDataReader reader : currentMultiVideoReader.getReaders())
+      {
+         TimestampScrubber scrubber = reader.getTimestampScrubber();
+         if (scrubber != null)
+            scrubber.setDelay(scrubber.getDelay() + signedDelta);
+      }
+
+      long currentRobotTimestamp = session.getLogDataReader().getTimestamp().getLongValue();
+      currentMultiVideoReader.readVideoFrameInBackground(currentRobotTimestamp);
+
+      refreshVideoOffsetLabel();
+      videoOffsetStatusLabel.setText(String.format("Applied %+.3f s. Set new keyframes and click Adjust again to refine.", signedDelta / 1.0e9));
+      updateVideoOffsetButtonStates();
+   }
+
+   @FXML
+   public void writeVideoOffset()
+   {
+      if (currentMultiVideoReader == null)
+         return;
+      long unixTs = System.currentTimeMillis() / 1000L;
+      int writtenCount = 0;
+      StringBuilder errors = new StringBuilder();
+
+      for (VideoDataReader reader : currentMultiVideoReader.getReaders())
+      {
+         TimestampScrubber scrubber = reader.getTimestampScrubber();
+         if (scrubber == null)
+            continue;
+         long delay = scrubber.getDelay();
+         if (delay == 0L)
+            continue;
+         File source = scrubber.getTimestampFile();
+         if (source == null)
+            continue;
+         File backup = new File(source.getParentFile(), source.getName() + ".bak." + unixTs);
+         try
+         {
+            Files.copy(source.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            File tmp = new File(source.getParentFile(), source.getName() + ".tmp." + unixTs);
+            TimestampScrubber.writeShifted(source, tmp, delay, scrubber.hasTimebase());
+            Files.move(tmp.toPath(), source.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            scrubber.setDelay(0L);
+            writtenCount++;
+         }
+         catch (IOException e)
+         {
+            LogTools.error("Failed to write shifted timestamps for " + source + ": " + e.getMessage());
+            errors.append(source.getName()).append(' ');
+         }
+      }
+
+      refreshVideoOffsetLabel();
+      if (errors.length() > 0)
+         videoOffsetStatusLabel.setText("Errors while writing: " + errors.toString().trim());
+      else if (writtenCount == 0)
+         videoOffsetStatusLabel.setText("No pending offset to write.");
+      else
+         videoOffsetStatusLabel.setText(String.format("Wrote %d timestamp file(s); originals backed up with .bak.%d suffix.", writtenCount, unixTs));
+      updateVideoOffsetButtonStates();
+   }
+
+   @FXML
+   public void resetVideoOffset()
+   {
+      if (currentMultiVideoReader == null)
+         return;
+      for (VideoDataReader reader : currentMultiVideoReader.getReaders())
+      {
+         TimestampScrubber scrubber = reader.getTimestampScrubber();
+         if (scrubber != null)
+            scrubber.setDelay(0L);
+      }
+      LogSession session = activeSessionProperty.get();
+      if (session != null)
+         currentMultiVideoReader.readVideoFrameInBackground(session.getLogDataReader().getTimestamp().getLongValue());
+      refreshVideoOffsetLabel();
+      videoOffsetStatusLabel.setText("In-memory offset cleared.");
+      updateVideoOffsetButtonStates();
    }
 
    public void resetTrims()

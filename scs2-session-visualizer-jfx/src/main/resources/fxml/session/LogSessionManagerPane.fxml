@@ -7,7 +7,9 @@
 <?import com.jfoenix.controls.JFXTrimSlider?>
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.RadioButton?>
 <?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.control.ToggleGroup?>
 <?import javafx.scene.layout.*?>
 <AnchorPane fx:id="mainPane" minHeight="-Infinity" minWidth="-Infinity" stylesheets="@../../css/GeneralStylesheet.css" xmlns="http://javafx.com/javafx/15.0.1"
             xmlns:fx="http://javafx.com/fxml/1" fx:controller="us.ihmc.scs2.sessionVisualizer.jfx.session.log.LogSessionManagerController">
@@ -74,6 +76,47 @@
                     </children>
                 </VBox>
                 <AnchorPane fx:id="cropProgressMonitorPane" VBox.vgrow="NEVER"/>
+                <TitledPane fx:id="videoOffsetTitledPane" animated="false" disable="true" expanded="false" minHeight="-Infinity" minWidth="-Infinity"
+                            text="Video offset adjustment" VBox.vgrow="NEVER">
+                    <content>
+                        <VBox spacing="5.0">
+                            <children>
+                                <HBox alignment="CENTER_LEFT" spacing="10.0">
+                                    <children>
+                                        <Label text="Current offset:"/>
+                                        <Label fx:id="videoOffsetValueLabel" minWidth="-Infinity" text="0.000 s"/>
+                                    </children>
+                                </HBox>
+                                <HBox alignment="CENTER_LEFT" spacing="10.0">
+                                    <children>
+                                        <Label text="Shift direction:"/>
+                                        <fx:define>
+                                            <ToggleGroup fx:id="videoShiftDirectionToggleGroup"/>
+                                        </fx:define>
+                                        <RadioButton fx:id="videoLeftDataRightRadio" selected="true" text="Video Left, Data Right"
+                                                     toggleGroup="$videoShiftDirectionToggleGroup"/>
+                                        <RadioButton fx:id="videoRightDataLeftRadio" text="Video Right, Data Left"
+                                                     toggleGroup="$videoShiftDirectionToggleGroup"/>
+                                    </children>
+                                </HBox>
+                                <HBox alignment="CENTER_LEFT" spacing="10.0">
+                                    <children>
+                                        <JFXButton fx:id="adjustVideoOffsetButton" minHeight="-Infinity" minWidth="-Infinity"
+                                                   onAction="#adjustVideoOffset" styleClass="log-trim-controls-button" text="Adjust Offset"/>
+                                        <JFXButton fx:id="writeVideoOffsetButton" minHeight="-Infinity" minWidth="-Infinity"
+                                                   onAction="#writeVideoOffset" styleClass="log-trim-controls-button" text="Write Offset"/>
+                                        <JFXButton fx:id="resetVideoOffsetButton" minHeight="-Infinity" minWidth="-Infinity"
+                                                   onAction="#resetVideoOffset" styleClass="log-trim-controls-button" text="Reset"/>
+                                    </children>
+                                </HBox>
+                                <Label fx:id="videoOffsetStatusLabel" text="" wrapText="true"/>
+                            </children>
+                            <padding>
+                                <Insets bottom="5.0" left="5.0" right="5.0" top="5.0"/>
+                            </padding>
+                        </VBox>
+                    </content>
+                </TitledPane>
                 <TitledPane fx:id="thumbnailsTitledPane" animated="false" disable="true" expanded="false" maxHeight="1.7976931348623157E308"
                             maxWidth="1.7976931348623157E308" minHeight="-Infinity" minWidth="-Infinity" text="No video" VBox.vgrow="ALWAYS">
                     <content>

@@ -2,6 +2,7 @@ package us.ihmc.scs2.sessionVisualizer.jfx.session.log;
 
 import logger_msgs.Camera;
 import us.ihmc.scs2.session.log.ProgressConsumer;
+import us.ihmc.scs2.session.log.TimestampScrubber;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,4 +33,9 @@ public interface VideoDataReader
    int getCurrentIndex();
 
    boolean replacedRobotTimestampsContainsIndex(int index);
+
+   default TimestampScrubber getTimestampScrubber()
+   {
+      return null;
+   }
 }

@@ -5,6 +5,7 @@ import us.ihmc.codecs.generated.YUVPicture;
 import us.ihmc.concurrent.ConcurrentCopier;
 import us.ihmc.scs2.session.log.BlackMagicScrubber;
 import us.ihmc.scs2.session.log.ProgressConsumer;
+import us.ihmc.scs2.session.log.TimestampScrubber;
 
 import java.io.File;
 import java.io.IOException;
@@ -81,5 +82,11 @@ public class BlackMagicVideoDataReader implements VideoDataReader
    public boolean replacedRobotTimestampsContainsIndex(int index)
    {
       return blackMagicScrubber.replacedRobotTimestampsContainsIndex(index);
+   }
+
+   @Override
+   public TimestampScrubber getTimestampScrubber()
+   {
+      return blackMagicScrubber.getTimestampScrubber();
    }
 }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -197,5 +198,64 @@ public class TimestampScrubberTest
       int insertionPointIndex = scrubber.getCurrentIndex();
 
       assertEquals(1, insertionPointIndex);
+   }
+
+   @Test
+   public void testWriteShiftedRoundTripVideoLags() throws IOException, URISyntaxException
+   {
+      // Positive offset: emulates baking in a delay applied because the video lagged the robot data.
+      verifyWriteShiftedRoundTrip(123_456_789L);
+   }
+
+   @Test
+   public void testWriteShiftedRoundTripVideoLeads() throws IOException, URISyntaxException
+   {
+      // Negative offset: emulates baking in a delay applied because the video led the robot data.
+      verifyWriteShiftedRoundTrip(-987_654_321L);
+   }
+
+   @Test
+   public void testWriteShiftedRoundTripZero() throws IOException, URISyntaxException
+   {
+      // Zero offset must be a no-op semantically (file contents may differ in whitespace only, but mapping is identical).
+      verifyWriteShiftedRoundTrip(0L);
+   }
+
+   private static void verifyWriteShiftedRoundTrip(long bakedOffset) throws IOException, URISyntaxException
+   {
+      File source = new File(Objects.requireNonNull(TimestampScrubberTest.class.getClassLoader().getResource("sessionLogs/Capture.dat")).toURI());
+
+      // Mapping obtained from the source file with delay == bakedOffset.
+      TimestampScrubber sourceScrubber = new TimestampScrubber(source, true, false);
+      sourceScrubber.setDelay(bakedOffset);
+
+      long[] sourceRobotTs = sourceScrubber.getRobotTimestampsArray();
+      int sampleCount = Math.min(50, sourceRobotTs.length);
+      long[] queries = new long[sampleCount];
+      long[] expectedVideoTs = new long[sampleCount];
+      int step = Math.max(1, sourceRobotTs.length / sampleCount);
+      for (int i = 0; i < sampleCount; i++)
+      {
+         // Query the unshifted source timestamp so the shift actually changes what gets returned.
+         queries[i] = sourceRobotTs[Math.min(i * step, sourceRobotTs.length - 1)];
+         expectedVideoTs[i] = sourceScrubber.getVideoTimestampFromRobotTimestamp(queries[i]);
+      }
+
+      File target = Files.createTempFile("Capture-shifted-", ".dat").toFile();
+      target.deleteOnExit();
+      TimestampScrubber.writeShifted(source, target, bakedOffset, true);
+
+      // Re-parsing the target with delay == 0 must give the same mapping.
+      TimestampScrubber roundTripScrubber = new TimestampScrubber(target, true, false);
+      for (int i = 0; i < sampleCount; i++)
+      {
+         long actualVideoTs = roundTripScrubber.getVideoTimestampFromRobotTimestamp(queries[i]);
+         assertEquals(expectedVideoTs[i],
+                      actualVideoTs,
+                      "Sample " + i + ": query=" + queries[i] + " bakedOffset=" + bakedOffset);
+      }
+
+      // Header should be preserved.
+      assertEquals(sourceRobotTs.length, roundTripScrubber.getRobotTimestampsLength(), "Row count mismatch after round trip");
    }
 }

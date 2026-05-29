@@ -10,6 +10,7 @@ import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.JavaFXFrameConverter;
 import us.ihmc.scs2.session.log.MagewellScrubber;
 import us.ihmc.scs2.session.log.ProgressConsumer;
+import us.ihmc.scs2.session.log.TimestampScrubber;
 
 import java.io.File;
 import java.io.IOException;
@@ -128,5 +129,11 @@ public class MagewellVideoDataReader implements VideoDataReader
    public boolean replacedRobotTimestampsContainsIndex(int index)
    {
       return magewellScrubber.replacedRobotTimestampsContainsIndex(index);
+   }
+
+   @Override
+   public TimestampScrubber getTimestampScrubber()
+   {
+      return magewellScrubber.getTimestampScrubber();
    }
 }
