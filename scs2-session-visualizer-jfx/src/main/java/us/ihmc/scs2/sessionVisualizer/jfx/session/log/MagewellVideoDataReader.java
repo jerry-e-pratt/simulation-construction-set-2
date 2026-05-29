@@ -21,6 +21,7 @@ public class MagewellVideoDataReader implements VideoDataReader
    private final MagewellScrubber magewellScrubber;
    private final FrameData frameData = new FrameData();
    private static final WritablePixelFormat<java.nio.IntBuffer> ARGB_PIXEL_FORMAT = PixelFormat.getIntArgbInstance();
+   private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
    private int[] pixelBuffer = null;
 
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
@@ -91,10 +92,7 @@ public class MagewellVideoDataReader implements VideoDataReader
          return null;
       }
 
-      try (JavaFXFrameConverter frameConverter = new JavaFXFrameConverter())
-      {
-         currentImage = frameConverter.convert(frameToConvert);
-      }
+      currentImage = frameConverter.convert(frameToConvert);
       int width = (int) currentImage.getWidth();
       int height = (int) currentImage.getHeight();
       WritableImage writableImage = new WritableImage(width, height);
