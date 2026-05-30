@@ -1,5 +1,8 @@
 package us.ihmc.scs2.sessionVisualizer.jfx.session.log;
 
+import java.nio.IntBuffer;
+
+import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.WritableImage;
 
 /**
@@ -9,6 +12,12 @@ import javafx.scene.image.WritableImage;
 public class FrameData
 {
    public WritableImage frame;
+   /**
+    * Non-null when {@link #frame} is backed by a {@link PixelBuffer}; the producer writes pixels into the buffer and the
+    * consumer must invoke {@link PixelBuffer#updateBuffer(javafx.util.Callback)} on the JavaFX Application Thread to mark
+    * the image dirty for the next pulse. Null for readers that populate {@link #frame} via {@code PixelWriter.setPixels}.
+    */
+   public PixelBuffer<IntBuffer> pixelBuffer;
    public long queryRobotTimestamp;
    public long currentRobotTimestamp;
    public long currentVideoTimestamp;

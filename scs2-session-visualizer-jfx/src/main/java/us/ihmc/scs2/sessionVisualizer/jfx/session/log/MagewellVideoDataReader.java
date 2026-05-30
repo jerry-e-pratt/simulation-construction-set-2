@@ -1,9 +1,8 @@
 package us.ihmc.scs2.sessionVisualizer.jfx.session.log;
 
 import javafx.scene.image.Image;
+import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.PixelFormat;
-import javafx.scene.image.PixelReader;
-import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
 import javafx.scene.image.WritablePixelFormat;
 import org.bytedeco.javacv.Frame;
@@ -16,14 +15,17 @@ import us.ihmc.scs2.session.log.TimestampScrubber;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
 
 public class MagewellVideoDataReader implements VideoDataReader
 {
    private final MagewellScrubber magewellScrubber;
    private final ConcurrentCopier<FrameData> imageBuffer = new ConcurrentCopier<>(FrameData::new);
-   private static final WritablePixelFormat<java.nio.IntBuffer> ARGB_PIXEL_FORMAT = PixelFormat.getIntArgbInstance();
+   // PixelBuffer requires premultiplied alpha; video frames are opaque so this is a no-op vs. non-premultiplied.
+   private static final WritablePixelFormat<IntBuffer> ARGB_PRE_PIXEL_FORMAT = PixelFormat.getIntArgbPreInstance();
    private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
-   private int[] pixelBuffer = null;
 
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
@@ -55,39 +57,30 @@ public class MagewellVideoDataReader implements VideoDataReader
       copyForWriting.currentRobotTimestamp = magewellScrubber.getCurrentRobotTimestamp();
       copyForWriting.currentVideoTimestamp = magewellScrubber.getCurrentVideoTimestamp();
       copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
-      copyForWriting.frame = convertFrameToWritableImage(nextFrame, copyForWriting.frame);
+      writeFrameIntoSlot(nextFrame, copyForWriting);
       imageBuffer.commit();
    }
 
    /**
-    * Converts a {@link Frame} to a {@link WritableImage} for display in JavaFX, reusing the provided
-    * {@code reusable} image when its dimensions match the converted frame.
-    *
-    * @param frameToConvert the next frame to visualize.
-    * @param reusable       the previously returned image for this buffer slot, or {@code null} on first use.
-    * @return the populated {@link WritableImage}; {@code reusable} when dimensions match, otherwise a new instance.
+    * Decodes {@code frameToConvert} directly into the {@link PixelBuffer} backing the slot's {@link WritableImage}.
+    * Allocates (or reallocates) the buffer-backed image when the slot is empty or the frame dimensions changed.
+    * The pixel writes happen here (any thread); the consumer must call {@link PixelBuffer#updateBuffer} on the
+    * JavaFX Application Thread to publish the change for the next pulse.
     */
-   public WritableImage convertFrameToWritableImage(Frame frameToConvert, WritableImage reusable)
+   private void writeFrameIntoSlot(Frame frameToConvert, FrameData slot)
    {
       Image currentImage = frameConverter.convert(frameToConvert);
       int width = (int) currentImage.getWidth();
       int height = (int) currentImage.getHeight();
 
-      WritableImage writableImage = reusable;
-      if (writableImage == null || (int) writableImage.getWidth() != width || (int) writableImage.getHeight() != height)
-         writableImage = new WritableImage(width, height);
+      if (slot.pixelBuffer == null || (int) slot.frame.getWidth() != width || (int) slot.frame.getHeight() != height)
+      {
+         IntBuffer backing = ByteBuffer.allocateDirect(width * height * Integer.BYTES).order(ByteOrder.nativeOrder()).asIntBuffer();
+         slot.pixelBuffer = new PixelBuffer<>(width, height, backing, ARGB_PRE_PIXEL_FORMAT);
+         slot.frame = new WritableImage(slot.pixelBuffer);
+      }
 
-      PixelReader pixelReader = currentImage.getPixelReader();
-      PixelWriter pixelWriter = writableImage.getPixelWriter();
-
-      int required = width * height;
-      if (pixelBuffer == null || pixelBuffer.length < required)
-         pixelBuffer = new int[required];
-
-      pixelReader.getPixels(0, 0, width, height, ARGB_PIXEL_FORMAT, pixelBuffer, 0, width);
-      pixelWriter.setPixels(0, 0, width, height, ARGB_PIXEL_FORMAT, pixelBuffer, 0, width);
-
-      return writableImage;
+      currentImage.getPixelReader().getPixels(0, 0, width, height, ARGB_PRE_PIXEL_FORMAT, slot.pixelBuffer.getBuffer(), width);
    }
 
    public void cropVideo(File outputFile, File timestampFile, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException

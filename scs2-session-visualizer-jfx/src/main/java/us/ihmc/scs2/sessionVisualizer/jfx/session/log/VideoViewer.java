@@ -234,6 +234,12 @@ public class VideoViewer
 
       WritableImage currentFrame = currentFrameData.frame;
 
+      // PixelBuffer-backed images (e.g. MagewellVideoDataReader) need an FX-thread updateBuffer to mark the dirty
+      // region for the next pulse; setPixels-based readers leave pixelBuffer null and rely on JavaFX's own dirty
+      // tracking.
+      if (currentFrameData.pixelBuffer != null)
+         currentFrameData.pixelBuffer.updateBuffer(b -> null);
+
       thumbnailContainer.setPrefWidth(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize);
       thumbnailContainer.setPrefHeight(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize * currentFrame.getHeight() / currentFrame.getWidth());
 
