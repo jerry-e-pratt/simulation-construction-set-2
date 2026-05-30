@@ -29,7 +29,15 @@ public class MagewellVideoDataReader implements VideoDataReader
 
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
-      magewellScrubber = new MagewellScrubber(camera, dataDirectory, hasTimeBase);
+      this(new MagewellScrubber(camera, dataDirectory, hasTimeBase));
+   }
+
+   /**
+    * Scrubber-injecting overload for subclasses that supply a non-default scrubber (e.g. NVDEC-backed).
+    */
+   protected MagewellVideoDataReader(MagewellScrubber magewellScrubber)
+   {
+      this.magewellScrubber = magewellScrubber;
    }
 
    public int getImageHeight()

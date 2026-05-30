@@ -18,7 +18,7 @@ public class MagewellScrubber
    private final TimestampScrubber timestampScrubber;
    private final String name;
 
-   private final MagewellDemuxer magewellDemuxer;
+   private final MagewellDemuxerLike magewellDemuxer;
 
    private final Camera camera;
    private long currentVideoTimestamp;
@@ -46,6 +46,16 @@ public class MagewellScrubber
 
    public MagewellScrubber(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
+      this(camera, dataDirectory, hasTimeBase, defaultSoftwareDemuxer(dataDirectory, camera));
+   }
+
+   /**
+    * Demuxer-injecting overload used by NVDEC-backed subclasses. The supplied {@code demuxer} replaces
+    * the software {@link MagewellDemuxer} that the public constructor would have built; everything else
+    * (timestamp scrubber, delay tracking, seek-vs-stream policy) is identical.
+    */
+   protected MagewellScrubber(Camera camera, File dataDirectory, boolean hasTimeBase, MagewellDemuxerLike demuxer) throws IOException
+   {
       this.camera = camera;
       name = camera.getNameAsString();
       boolean interlaced = camera.getInterlaced();
@@ -55,17 +65,20 @@ public class MagewellScrubber
          System.err.println("Video data is using timestamps instead of frame numbers. Falling back to seeking based on timestamp.");
       }
 
-      File videoFile = new File(dataDirectory, camera.getVideoFileAsString());
+      magewellDemuxer = demuxer;
 
+      File timestampFile = new File(dataDirectory, camera.getTimestampFileAsString());
+      this.timestampScrubber = new TimestampScrubber(timestampFile, hasTimeBase, interlaced);
+   }
+
+   private static MagewellDemuxerLike defaultSoftwareDemuxer(File dataDirectory, Camera camera) throws IOException
+   {
+      File videoFile = new File(dataDirectory, camera.getVideoFileAsString());
       if (!videoFile.exists())
       {
          throw new IOException("Cannot find video: " + videoFile);
       }
-
-      magewellDemuxer = new MagewellDemuxer(videoFile);
-
-      File timestampFile = new File(dataDirectory, camera.getTimestampFileAsString());
-      this.timestampScrubber = new TimestampScrubber(timestampFile, hasTimeBase, interlaced);
+      return new UpstreamMagewellDemuxerAdapter(new MagewellDemuxer(videoFile));
    }
 
    public int getImageHeight()
@@ -189,7 +202,7 @@ public class MagewellScrubber
       timestampWriter.close();
    }
 
-   private static long getFrameAtTimestamp(long endCameraTimestamp, MagewellDemuxer magewellDemuxer)
+   private static long getFrameAtTimestamp(long endCameraTimestamp, MagewellDemuxerLike magewellDemuxer)
    {
       magewellDemuxer.seekToPTS(endCameraTimestamp);
       return magewellDemuxer.getFrameNumber();
@@ -210,7 +223,7 @@ public class MagewellScrubber
       return timestampScrubber;
    }
 
-   public MagewellDemuxer getMagewellDemuxer()
+   public MagewellDemuxerLike getMagewellDemuxer()
    {
       return magewellDemuxer;
    }

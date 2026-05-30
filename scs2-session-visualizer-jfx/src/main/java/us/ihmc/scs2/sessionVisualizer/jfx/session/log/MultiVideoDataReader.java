@@ -31,7 +31,9 @@ public class MultiVideoDataReader
             VideoDataReader reader;
             if (camera.getType().toString().equals(CameraType.CAPTURE_CARD_MAGEWELL.toString()))
             {
-               reader = new MagewellVideoDataReader(camera, dataDirectory, logProperties.getVideo().getHasTimebase());
+               reader = tryOpenNvdecMagewellReader(camera, dataDirectory, logProperties.getVideo().getHasTimebase());
+               if (reader == null)
+                  reader = new MagewellVideoDataReader(camera, dataDirectory, logProperties.getVideo().getHasTimebase());
             }
             else if (camera.getType().toString().equals(CameraType.CAPTURE_CARD.toString()))
             {
@@ -54,6 +56,24 @@ public class MultiVideoDataReader
       {
          VideoDataReader reader = new ZEDSVOVideoDataReader(zedSensorDatFile);
          readers.add(reader);
+      }
+   }
+
+   /**
+    * Probes for NVDEC support on this machine + source file. Returns the GPU-backed reader on success, or
+    * {@code null} when no NVIDIA hardware decoder can be opened for this video; in the {@code null} case the
+    * caller falls back to {@link MagewellVideoDataReader}. Any failure during NVDEC init is swallowed silently
+    * by design: NVDEC is a per-machine optimization, not a contract.
+    */
+   private static VideoDataReader tryOpenNvdecMagewellReader(Camera camera, File dataDirectory, boolean hasTimebase)
+   {
+      try
+      {
+         return new NvdecMagewellVideoDataReader(camera, dataDirectory, hasTimebase);
+      }
+      catch (IOException | RuntimeException e)
+      {
+         return null;
       }
    }
 
