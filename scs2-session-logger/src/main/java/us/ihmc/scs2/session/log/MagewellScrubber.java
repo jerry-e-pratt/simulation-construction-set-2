@@ -44,6 +44,28 @@ public class MagewellScrubber
     */
    private static final int MAX_PACKETS_PER_FRAME_READ = 1024;
 
+   /**
+    * Fallback frame period used to derive the streaming catch-up threshold when the demuxer reports an
+    * unusable frame rate (<= 0 or NaN). 30 fps matches the most common Magewell capture rate.
+    */
+   private static final double FALLBACK_FRAME_RATE_FPS = 30.0;
+
+   /**
+    * Multiplier on the source frame period that determines when streaming playback switches from
+    * single-frame advance to a multi-frame catch-up. In steady-state 1x playback the per-call
+    * forward delta is exactly one frame period, so 1.5 absorbs sub-frame scheduling jitter while
+    * still catching up before lag has any chance to compound into the seek-tolerance window.
+    */
+   private static final double STREAMING_CATCHUP_THRESHOLD_FRAMES = 1.5;
+
+   /**
+    * Threshold (microseconds) at or below which the streaming branch advances a single frame; above
+    * this and within {@link #FORWARD_PLAYBACK_TOLERANCE_US}, the streaming branch catches up to the
+    * requested PTS via {@link #advanceToVideoFrameAtOrAfter(long)}. Computed once from the source
+    * frame rate so the threshold tracks 30 fps vs. 60 fps captures.
+    */
+   private final long streamingCatchupThresholdUS;
+
    public MagewellScrubber(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
       this(camera, dataDirectory, hasTimeBase, defaultSoftwareDemuxer(dataDirectory, camera));
@@ -69,6 +91,11 @@ public class MagewellScrubber
 
       File timestampFile = new File(dataDirectory, camera.getTimestampFileAsString());
       this.timestampScrubber = new TimestampScrubber(timestampFile, hasTimeBase, interlaced);
+
+      double frameRate = demuxer.getFrameRate();
+      if (!(frameRate > 0.0) || Double.isInfinite(frameRate) || Double.isNaN(frameRate))
+         frameRate = FALLBACK_FRAME_RATE_FPS;
+      streamingCatchupThresholdUS = (long) (STREAMING_CATCHUP_THRESHOLD_FRAMES * 1_000_000.0 / frameRate);
    }
 
    private static MagewellDemuxerLike defaultSoftwareDemuxer(File dataDirectory, Camera camera) throws IOException
@@ -123,14 +150,21 @@ public class MagewellScrubber
          magewellDemuxer.seekToPTS(currentVideoTimestamp);
          frame = advanceToVideoFrameAtOrAfter(currentVideoTimestamp);
       }
+      else if (forwardDelta > streamingCatchupThresholdUS)
+      {
+         // Catch-up branch: forward delta exceeds one frame period (with jitter slack) but is
+         // still inside the seek tolerance, so we drain video frames up to the requested PTS
+         // without a keyframe seek. This prevents single-frame lag from compounding across calls
+         // until it crosses FORWARD_PLAYBACK_TOLERANCE_US and triggers a visible 250-ms jump:
+         // any intermediate frames the session already passed are dropped silently instead.
+         frame = advanceToVideoFrameAtOrAfter(currentVideoTimestamp);
+      }
       else
       {
-         // Streaming branch: requested PTS is within the forward-playback tolerance of the
-         // decoder's current position, so we are in sequential playback. Return exactly one
-         // image-bearing frame per call instead of catching up to the target — at 1x speed
-         // every frame the decoder produces reaches the screen instead of the catch-up loop
-         // throwing N-1 frames away every poll. If playback ever drifts past the tolerance
-         // window, the next call's forward-delta check trips needsSeek and we resync.
+         // Streaming branch: requested PTS is within one frame period of the decoder's current
+         // position, i.e. steady-state sequential playback. Return exactly one image-bearing
+         // frame per call so every decoded frame reaches the screen at 1x speed instead of the
+         // catch-up loop throwing N-1 frames away every poll.
          frame = advanceOneVideoFrame();
       }
 
