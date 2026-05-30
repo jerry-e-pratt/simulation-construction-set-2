@@ -4,7 +4,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Future;
 
 import us.ihmc.robotDataLogger.Camera;
 import us.ihmc.robotDataLogger.CameraType;
@@ -12,16 +11,16 @@ import us.ihmc.robotDataLogger.LogProperties;
 import us.ihmc.scs2.session.log.ProgressConsumer;
 import us.ihmc.scs2.session.log.ZEDSVOScrubber;
 import us.ihmc.scs2.sessionVisualizer.jfx.managers.BackgroundExecutorManager;
+import us.ihmc.scs2.sessionVisualizer.jfx.session.LatestTimestampBackgroundExecutor;
 
 public class MultiVideoDataReader
 {
    private final List<VideoDataReader> readers = new ArrayList<>();
-   private final BackgroundExecutorManager backgroundExecutorManager;
-   private Future<?> currentTask = null;
+   private final LatestTimestampBackgroundExecutor backgroundReader;
 
    public MultiVideoDataReader(File dataDirectory, LogProperties logProperties, BackgroundExecutorManager backgroundExecutorManager)
    {
-      this.backgroundExecutorManager = backgroundExecutorManager;
+      this.backgroundReader = new LatestTimestampBackgroundExecutor(backgroundExecutorManager, this::readVideoFrameNow);
       List<Camera> cameras = logProperties.getCameras();
 
       for (int i = 0; i < cameras.size(); i++)
@@ -65,8 +64,7 @@ public class MultiVideoDataReader
 
    public void readVideoFrameInBackground(long queryRobotTimestamp)
    {
-      if (currentTask == null || currentTask.isDone())
-         currentTask = backgroundExecutorManager.executeInBackground(() -> readVideoFrameNow(queryRobotTimestamp));
+      backgroundReader.submit(queryRobotTimestamp);
    }
 
    public void crop(File selectedDirectory, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException
