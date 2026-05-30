@@ -57,6 +57,16 @@ public class VideoViewer
    private final Label currentVideoTimestampLabel = new Label();
    private final Label currentRobotTimestampLabel = new Label();
 
+   // Always-on performance overlay: served fps is computed from currentVideoTimestamp transitions
+   // observed by the FX-thread update() loop, decode rate / time / source fps are forwarded from
+   // the reader. Lets the user distinguish session-tick bottlenecks from decode-pipeline bottlenecks.
+   private final Label perfOverlayLabel = new Label();
+   private static final long SERVED_FPS_WINDOW_NANOS = 1_000_000_000L;
+   private long lastSeenVideoTimestamp = Long.MIN_VALUE;
+   private long servedWindowStartNanos = 0L;
+   private int servedFramesInWindow = 0;
+   private double servedFpsHz = Double.NaN;
+
    private final BooleanProperty updateVideoView = new SimpleBooleanProperty(this, "updateVideoView", false);
    private final ObjectProperty<Stage> videoWindowProperty = new SimpleObjectProperty<>(this, "videoWindow", null);
    private final VideoDataReader reader;
@@ -111,6 +121,7 @@ public class VideoViewer
             imageViewRootPane.set(root);
 
             setupVideoStatistics(anchorPane);
+            setupPerformanceOverlay(anchorPane);
 
             videoWindowProperty.set(stage);
             stage.getIcons().add(SessionVisualizerIOTools.LOG_SESSION_IMAGE);
@@ -197,6 +208,46 @@ public class VideoViewer
       }
    }
 
+   private void setupPerformanceOverlay(AnchorPane anchorPane)
+   {
+      perfOverlayLabel.setFont(Font.font("Monospaced", FontWeight.BOLD, 12));
+      perfOverlayLabel.setTextFill(Color.LIME);
+      perfOverlayLabel.setBackground(new Background(new BackgroundFill(Color.color(0, 0, 0, 0.55), CornerRadii.EMPTY, Insets.EMPTY)));
+      perfOverlayLabel.setPadding(new Insets(2, 6, 2, 6));
+      perfOverlayLabel.setText("served --  decode -- @ -- ms  source -- fps");
+      anchorPane.getChildren().add(perfOverlayLabel);
+      AnchorPane.setTopAnchor(perfOverlayLabel, 4.0);
+      AnchorPane.setRightAnchor(perfOverlayLabel, 4.0);
+   }
+
+   private void updateServedFps(long currentVideoTimestamp)
+   {
+      if (currentVideoTimestamp == lastSeenVideoTimestamp)
+         return;
+      long nowNanos = System.nanoTime();
+      if (servedWindowStartNanos == 0L)
+         servedWindowStartNanos = nowNanos;
+      servedFramesInWindow++;
+      long elapsedNanos = nowNanos - servedWindowStartNanos;
+      if (elapsedNanos >= SERVED_FPS_WINDOW_NANOS)
+      {
+         servedFpsHz = servedFramesInWindow * 1_000_000_000.0 / elapsedNanos;
+         servedWindowStartNanos = nowNanos;
+         servedFramesInWindow = 0;
+      }
+      lastSeenVideoTimestamp = currentVideoTimestamp;
+   }
+
+   private static String formatFps(double hz)
+   {
+      return Double.isNaN(hz) ? "--" : String.format("%.1f", hz);
+   }
+
+   private static String formatMillis(double ms)
+   {
+      return Double.isNaN(ms) ? "--" : String.format("%.1f", ms);
+   }
+
    private static Pane createImageViewPane(ImageView imageView)
    {
       return new Pane(imageView)
@@ -252,6 +303,13 @@ public class VideoViewer
          currentRobotTimestampLabel.setText(Long.toString(currentFrameData.currentRobotTimestamp));
          currentVideoTimestampLabel.setText(Long.toString(currentFrameData.currentVideoTimestamp));
          currentDemuxerTimestampLabel.setText(Long.toString(currentFrameData.currentDemuxerTimestamp));
+
+         updateServedFps(currentFrameData.currentVideoTimestamp);
+         perfOverlayLabel.setText(String.format("served %s  decode %s @ %s ms  source %s fps",
+                                                formatFps(servedFpsHz),
+                                                formatFps(reader.getDecodeRateHz()),
+                                                formatMillis(reader.getDecodeTimeMillis()),
+                                                formatFps(reader.getSourceFrameRateHz())));
 
          if (imageViewRootPane.get() != null)
          {

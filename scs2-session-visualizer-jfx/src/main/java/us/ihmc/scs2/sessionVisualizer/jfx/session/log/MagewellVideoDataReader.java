@@ -27,6 +27,18 @@ public class MagewellVideoDataReader implements VideoDataReader
    private static final WritablePixelFormat<IntBuffer> ARGB_PRE_PIXEL_FORMAT = PixelFormat.getIntArgbPreInstance();
    private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
 
+   // Decode-throughput instrumentation. Written by the background decode thread inside
+   // readVideoFrame; read by the FX thread via the VideoDataReader stats getters. Only decode-
+   // bearing calls (those that produced a fresh image frame) update the metrics; early-return
+   // calls where the requested PTS matched the previous read are excluded so the rate / time
+   // reflect actual decoder work rather than poll frequency.
+   private static final double DECODE_TIME_EWMA_ALPHA = 0.2;
+   private static final long DECODE_RATE_WINDOW_NANOS = 1_000_000_000L;
+   private volatile double decodeTimeMillisEwma = Double.NaN;
+   private volatile double decodeRateHz = Double.NaN;
+   private long decodeWindowStartNanos = 0L;
+   private int decodesInWindow = 0;
+
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
       this(new MagewellScrubber(camera, dataDirectory, hasTimeBase));
@@ -56,6 +68,7 @@ public class MagewellVideoDataReader implements VideoDataReader
       // video timestamp, or null when the requested PTS matches the previous read (data rate exceeds
       // video frame rate) or no image frame was found before EOF / the safety cap. In every null case
       // we keep displaying the previously decoded frame.
+      long decodeStartNanos = System.nanoTime();
       Frame nextFrame = magewellScrubber.readVideoFrame(queryRobotTimestamp);
       if (nextFrame == null)
          return;
@@ -67,6 +80,44 @@ public class MagewellVideoDataReader implements VideoDataReader
       copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
       writeFrameIntoSlot(nextFrame, copyForWriting);
       imageBuffer.commit();
+      updateDecodeStatistics(decodeStartNanos);
+   }
+
+   private void updateDecodeStatistics(long decodeStartNanos)
+   {
+      long nowNanos = System.nanoTime();
+      double elapsedMillis = (nowNanos - decodeStartNanos) / 1_000_000.0;
+      double previous = decodeTimeMillisEwma;
+      decodeTimeMillisEwma = Double.isNaN(previous) ? elapsedMillis : DECODE_TIME_EWMA_ALPHA * elapsedMillis + (1.0 - DECODE_TIME_EWMA_ALPHA) * previous;
+
+      if (decodeWindowStartNanos == 0L)
+         decodeWindowStartNanos = nowNanos;
+      decodesInWindow++;
+      long windowElapsedNanos = nowNanos - decodeWindowStartNanos;
+      if (windowElapsedNanos >= DECODE_RATE_WINDOW_NANOS)
+      {
+         decodeRateHz = decodesInWindow * 1_000_000_000.0 / windowElapsedNanos;
+         decodeWindowStartNanos = nowNanos;
+         decodesInWindow = 0;
+      }
+   }
+
+   @Override
+   public double getDecodeRateHz()
+   {
+      return decodeRateHz;
+   }
+
+   @Override
+   public double getDecodeTimeMillis()
+   {
+      return decodeTimeMillisEwma;
+   }
+
+   @Override
+   public double getSourceFrameRateHz()
+   {
+      return magewellScrubber.getMagewellDemuxer().getFrameRate();
    }
 
    /**

@@ -111,12 +111,28 @@ public class MagewellScrubber
       // the tolerance window, so play and scrub landed on different frames for the same robot tick.
       long demuxerPTS = magewellDemuxer.getCurrentPTS();
       long forwardDelta = currentVideoTimestamp - demuxerPTS;
-      if (lastReadVideoTimestamp == Long.MIN_VALUE || forwardDelta < 0 || forwardDelta > FORWARD_PLAYBACK_TOLERANCE_US)
-      {
-         magewellDemuxer.seekToPTS(currentVideoTimestamp);
-      }
+      boolean needsSeek = lastReadVideoTimestamp == Long.MIN_VALUE || forwardDelta < 0 || forwardDelta > FORWARD_PLAYBACK_TOLERANCE_US;
 
-      Frame frame = advanceToVideoFrameAtOrAfter(currentVideoTimestamp);
+      Frame frame;
+      if (needsSeek)
+      {
+         // Seek / scrub branch: jump to the nearest preceding keyframe, then catch up to the
+         // requested PTS so the returned frame covers the user-visible tick exactly. Necessary
+         // for random-access scrubs and the first read; play and scrub then land on the same
+         // frame for the same robot timestamp.
+         magewellDemuxer.seekToPTS(currentVideoTimestamp);
+         frame = advanceToVideoFrameAtOrAfter(currentVideoTimestamp);
+      }
+      else
+      {
+         // Streaming branch: requested PTS is within the forward-playback tolerance of the
+         // decoder's current position, so we are in sequential playback. Return exactly one
+         // image-bearing frame per call instead of catching up to the target — at 1x speed
+         // every frame the decoder produces reaches the screen instead of the catch-up loop
+         // throwing N-1 frames away every poll. If playback ever drifts past the tolerance
+         // window, the next call's forward-delta check trips needsSeek and we resync.
+         frame = advanceOneVideoFrame();
+      }
 
       lastReadVideoTimestamp = currentVideoTimestamp;
       return frame;
@@ -146,6 +162,29 @@ public class MagewellScrubber
             return frame;
       }
       return lastImageFrame;
+   }
+
+   /**
+    * Streaming-branch helper: pulls packets until the next image-bearing {@link Frame} appears
+    * and returns it (skipping interleaved audio / timecode packets). Used during sequential
+    * forward playback so every decoded video frame reaches the screen — no target-landing,
+    * no catch-up loop. Returns {@code null} on EOF or if the safety cap is hit before an image
+    * frame appears.
+    */
+   private Frame advanceOneVideoFrame()
+   {
+      int packetsRead = 0;
+      while (packetsRead < MAX_PACKETS_PER_FRAME_READ)
+      {
+         Frame frame = magewellDemuxer.getNextFrame();
+         if (frame == null)
+            return null;
+         packetsRead++;
+         if (frame.image == null || frame.imageWidth <= 0 || frame.imageHeight <= 0)
+            continue;
+         return frame;
+      }
+      return null;
    }
 
    public void cropVideo(File outputFile, File timestampFile, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException
