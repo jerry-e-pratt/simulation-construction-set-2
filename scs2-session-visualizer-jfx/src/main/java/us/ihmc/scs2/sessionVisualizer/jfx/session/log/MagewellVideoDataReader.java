@@ -25,6 +25,9 @@ public class MagewellVideoDataReader implements VideoDataReader
    private final ConcurrentCopier<FrameData> imageBuffer = new ConcurrentCopier<>(FrameData::new);
    // PixelBuffer requires premultiplied alpha; video frames are opaque so this is a no-op vs. non-premultiplied.
    private static final WritablePixelFormat<IntBuffer> ARGB_PRE_PIXEL_FORMAT = PixelFormat.getIntArgbPreInstance();
+   // Fast-path BGRA->IntArgbPre aliasing depends on B,G,R,A native bytes packing into a 0xAARRGGBB int. True on
+   // little-endian hosts (x86_64, aarch64); on big-endian we fall back to the JavaFXFrameConverter path.
+   private static final boolean NATIVE_BYTE_ORDER_IS_LITTLE_ENDIAN = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
    private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
 
    // Decode-throughput instrumentation. Written by the background decode thread inside
@@ -125,21 +128,77 @@ public class MagewellVideoDataReader implements VideoDataReader
     * Allocates (or reallocates) the buffer-backed image when the slot is empty or the frame dimensions changed.
     * The pixel writes happen here (any thread); the consumer must call {@link PixelBuffer#updateBuffer} on the
     * JavaFX Application Thread to publish the change for the next pulse.
+    * <p>
+    * When the upstream grabber is configured to deliver packed 4-channel byte frames (BGRA, as set on the NVDEC
+    * demuxer's grabber), the bytes already match JavaFX's IntArgbPre layout on little-endian hosts and we copy them
+    * straight into the slot's direct ByteBuffer, skipping {@code JavaFXFrameConverter}'s
+    * {@code BufferedImage -> WritableImage -> getPixels} round-trip. Planar / non-byte frames (e.g. NV12 from the
+    * software MagewellDemuxer) take the converter fallback unchanged.
     */
    private void writeFrameIntoSlot(Frame frameToConvert, FrameData slot)
    {
+      if (NATIVE_BYTE_ORDER_IS_LITTLE_ENDIAN
+          && frameToConvert.image != null
+          && frameToConvert.image.length == 1
+          && frameToConvert.imageChannels == 4
+          && frameToConvert.image[0] instanceof ByteBuffer sourceBytes)
+      {
+         writePackedBgraIntoSlot(frameToConvert, sourceBytes, slot);
+         return;
+      }
+
       Image currentImage = frameConverter.convert(frameToConvert);
       int width = (int) currentImage.getWidth();
       int height = (int) currentImage.getHeight();
 
       if (slot.pixelBuffer == null || (int) slot.frame.getWidth() != width || (int) slot.frame.getHeight() != height)
       {
-         IntBuffer backing = ByteBuffer.allocateDirect(width * height * Integer.BYTES).order(ByteOrder.nativeOrder()).asIntBuffer();
-         slot.pixelBuffer = new PixelBuffer<>(width, height, backing, ARGB_PRE_PIXEL_FORMAT);
+         ByteBuffer backingBytes = ByteBuffer.allocateDirect(width * height * Integer.BYTES).order(ByteOrder.nativeOrder());
+         slot.pixelByteBuffer = backingBytes;
+         slot.pixelBuffer = new PixelBuffer<>(width, height, backingBytes.asIntBuffer(), ARGB_PRE_PIXEL_FORMAT);
          slot.frame = new WritableImage(slot.pixelBuffer);
       }
 
       currentImage.getPixelReader().getPixels(0, 0, width, height, ARGB_PRE_PIXEL_FORMAT, slot.pixelBuffer.getBuffer(), width);
+   }
+
+   /**
+    * Fast path for packed BGRA frames. {@code frame.imageStride} is the row stride in bytes (from FFmpeg's
+    * {@code AVFrame.linesize[0]}); when the source rows are tightly packed we do a single bulk transfer, otherwise
+    * we copy row-by-row to handle padded rows.
+    */
+   private void writePackedBgraIntoSlot(Frame frameToConvert, ByteBuffer sourceBytes, FrameData slot)
+   {
+      int width = frameToConvert.imageWidth;
+      int height = frameToConvert.imageHeight;
+      int sourceStrideBytes = frameToConvert.imageStride;
+      int destStrideBytes = width * Integer.BYTES;
+
+      if (slot.pixelBuffer == null || (int) slot.frame.getWidth() != width || (int) slot.frame.getHeight() != height)
+      {
+         ByteBuffer backingBytes = ByteBuffer.allocateDirect(width * height * Integer.BYTES).order(ByteOrder.nativeOrder());
+         slot.pixelByteBuffer = backingBytes;
+         slot.pixelBuffer = new PixelBuffer<>(width, height, backingBytes.asIntBuffer(), ARGB_PRE_PIXEL_FORMAT);
+         slot.frame = new WritableImage(slot.pixelBuffer);
+      }
+
+      ByteBuffer source = sourceBytes.duplicate();
+      ByteBuffer destination = slot.pixelByteBuffer;
+      destination.clear();
+
+      if (sourceStrideBytes == destStrideBytes)
+      {
+         source.position(0).limit(destStrideBytes * height);
+         destination.put(source);
+      }
+      else
+      {
+         for (int y = 0; y < height; y++)
+         {
+            source.limit(y * sourceStrideBytes + destStrideBytes).position(y * sourceStrideBytes);
+            destination.put(source);
+         }
+      }
    }
 
    public void cropVideo(File outputFile, File timestampFile, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException

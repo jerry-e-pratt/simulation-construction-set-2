@@ -1,6 +1,7 @@
 package us.ihmc.scs2.session.log;
 
 import org.bytedeco.ffmpeg.global.avcodec;
+import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FrameGrabber;
@@ -43,6 +44,13 @@ public final class NvdecMagewellDemuxer implements MagewellDemuxerLike
          nvdecGrabber.setVideoOption("resize", resize);
          LogTools.info("NVDEC 2:1 GPU resize enabled: %dx%d -> %s (%s)".formatted(probe.width, probe.height, resize, probe.cuvidName));
       }
+
+      // Ask the grabber to deliver frames already converted to packed BGRA. On little-endian hosts this
+      // byte layout (B,G,R,A) aliases JavaFX's IntArgbPre ints (0xAARRGGBB), so the reader can copy
+      // straight from frame.image[0] into the slot's PixelBuffer without going through the
+      // JavaFXFrameConverter -> BufferedImage -> WritableImage -> getPixels round-trip (two extra
+      // full-image CPU passes at source resolution).
+      nvdecGrabber.setPixelFormat(avutil.AV_PIX_FMT_BGRA);
 
       try
       {

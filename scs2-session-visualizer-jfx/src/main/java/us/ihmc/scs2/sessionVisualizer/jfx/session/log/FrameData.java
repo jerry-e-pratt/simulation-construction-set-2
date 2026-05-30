@@ -1,5 +1,6 @@
 package us.ihmc.scs2.sessionVisualizer.jfx.session.log;
 
+import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 
 import javafx.scene.image.PixelBuffer;
@@ -18,6 +19,13 @@ public class FrameData
     * the image dirty for the next pulse. Null for readers that populate {@link #frame} via {@code PixelWriter.setPixels}.
     */
    public PixelBuffer<IntBuffer> pixelBuffer;
+   /**
+    * Byte view over the same direct allocation that backs {@link #pixelBuffer}'s {@link IntBuffer}. Used by the fast-path
+    * writer that copies BGRA bytes from a grabber returning packed 4-channel frames straight into the slot, bypassing the
+    * intermediate {@code BufferedImage} + {@code WritableImage} round-trip that {@code JavaFXFrameConverter} would do.
+    * Null when no fast-path producer has written into the slot yet.
+    */
+   public ByteBuffer pixelByteBuffer;
    public long queryRobotTimestamp;
    public long currentRobotTimestamp;
    public long currentVideoTimestamp;
