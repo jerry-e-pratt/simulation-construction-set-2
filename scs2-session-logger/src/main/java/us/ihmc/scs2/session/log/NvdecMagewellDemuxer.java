@@ -22,12 +22,28 @@ public final class NvdecMagewellDemuxer implements MagewellDemuxerLike
 
    private final FFmpegFrameGrabber grabber;
 
+   /**
+    * Minimum post-resize width/height. Below this we skip the 2:1 GPU downsample so we don't ask
+    * CUVID to produce postage stamps from already-small captures.
+    */
+   private static final int MIN_RESIZE_DIM = 64;
+
    public NvdecMagewellDemuxer(File videoFile) throws FrameGrabber.Exception
    {
-      String cuvidName = pickCuvidDecoder(videoFile);
+      ProbeResult probe = probeSource(videoFile);
 
       FFmpegFrameGrabber nvdecGrabber = new FFmpegFrameGrabber(videoFile);
-      nvdecGrabber.setVideoCodecName(cuvidName);
+      nvdecGrabber.setVideoCodecName(probe.cuvidName);
+
+      String resize = computeHalfResize(probe.width, probe.height);
+      if (resize != null)
+      {
+         // CUVID applies the resize inside the GPU decoder before the frame is mapped to host memory,
+         // so the readback + swscale + getPixels stages downstream all run on 1/4 the pixels.
+         nvdecGrabber.setVideoOption("resize", resize);
+         LogTools.info("NVDEC 2:1 GPU resize enabled: %dx%d -> %s (%s)".formatted(probe.width, probe.height, resize, probe.cuvidName));
+      }
+
       try
       {
          nvdecGrabber.start();
@@ -48,10 +64,29 @@ public final class NvdecMagewellDemuxer implements MagewellDemuxerLike
    }
 
    /**
-    * Opens the file briefly with the default (auto-detected) decoder, reads the stream's codec ID, and
-    * picks the matching CUVID decoder name. Throws when the stream's codec isn't covered by NVDEC.
+    * Returns a {@code "WxH"} option string for the CUVID {@code resize} private option, halving each
+    * source dimension and rounding down to the nearest even integer (CUVID requires even dims). Returns
+    * {@code null} when the source is already small enough that 2:1 would produce a degenerate frame.
     */
-   private static String pickCuvidDecoder(File videoFile) throws FrameGrabber.Exception
+   private static String computeHalfResize(int srcWidth, int srcHeight)
+   {
+      if (srcWidth <= 0 || srcHeight <= 0)
+         return null;
+      int w = (srcWidth / 2) & ~1;
+      int h = (srcHeight / 2) & ~1;
+      if (w < MIN_RESIZE_DIM || h < MIN_RESIZE_DIM)
+         return null;
+      return w + "x" + h;
+   }
+
+   private record ProbeResult(String cuvidName, int width, int height) {}
+
+   /**
+    * Opens the file briefly with the default (auto-detected) decoder, reads the stream's codec ID and
+    * source resolution, and picks the matching CUVID decoder name. Throws when the stream's codec
+    * isn't covered by NVDEC.
+    */
+   private static ProbeResult probeSource(File videoFile) throws FrameGrabber.Exception
    {
       FFmpegFrameGrabber probe = new FFmpegFrameGrabber(videoFile);
       try
@@ -61,7 +96,7 @@ public final class NvdecMagewellDemuxer implements MagewellDemuxerLike
          String cuvidName = cuvidNameFor(codecId);
          if (cuvidName == null)
             throw new FrameGrabber.Exception("No CUVID decoder for codec id " + codecId);
-         return cuvidName;
+         return new ProbeResult(cuvidName, probe.getImageWidth(), probe.getImageHeight());
       }
       finally
       {
