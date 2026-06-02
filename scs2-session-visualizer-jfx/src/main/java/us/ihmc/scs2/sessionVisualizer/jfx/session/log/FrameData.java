@@ -26,6 +26,13 @@ public class FrameData
     * Null when no fast-path producer has written into the slot yet.
     */
    public ByteBuffer pixelByteBuffer;
+   /**
+    * Non-null when {@link #frame} / {@link #pixelBuffer} / {@link #pixelByteBuffer} were sourced from a
+    * {@link VideoFrameBufferPool}. Producers transfer one reference to the slot on commit; consumers that need the pixels
+    * to remain stable past the next poll must call {@link VideoFrameBufferPool.FrameBuffer#retain()} and release later.
+    * Null for readers that allocate or convert images directly.
+    */
+   public VideoFrameBufferPool.FrameBuffer frameBuffer;
    public long queryRobotTimestamp;
    public long currentRobotTimestamp;
    public long currentVideoTimestamp;

@@ -39,6 +39,7 @@ import javafx.stage.Window;
 import javafx.util.Duration;
 import us.ihmc.scs2.session.SessionPropertiesHelper;
 import us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizerIOTools;
+import us.ihmc.scs2.sessionVisualizer.jfx.session.log.VideoFrameBufferPool.FrameBuffer;
 import us.ihmc.scs2.sessionVisualizer.jfx.tools.JavaFXMissingTools;
 
 public class VideoViewer
@@ -74,10 +75,20 @@ public class VideoViewer
 
    private final ObjectProperty<Pane> imageViewRootPane = new SimpleObjectProperty<>(this, "imageViewRootPane", null);
 
+   private final VideoPlaybackTracer playbackTracer;
+
+   // FX-side ref-count holders for pooled FrameBuffers. We keep the two most-recently-served buffers alive: when a new
+   // buffer arrives at update() #N+2, we release the one served at #N -- by then the JavaFX render pulse for #N has
+   // long since completed, so the writer can safely recycle the buffer without tearing the displayed frame. Null for
+   // readers that don't go through VideoFrameBufferPool (BlackMagic, ZED), in which case no retain/release happens.
+   private FrameBuffer fxHeldCurrent = null;
+   private FrameBuffer fxHeldPrevious = null;
+
    public VideoViewer(Window owner, VideoDataReader reader, double defaultThumbnailSize)
    {
       this.reader = reader;
       this.defaultThumbnailSize = defaultThumbnailSize;
+      this.playbackTracer = VideoPlaybackTracer.create(reader.getName());
       thumbnail.setPreserveRatio(true);
       videoView.setPreserveRatio(true);
       thumbnail.setFitWidth(defaultThumbnailSize);
@@ -283,6 +294,11 @@ public class VideoViewer
       if (currentFrameData.frame == null)
          return;
 
+      // Hold the new pooled buffer alive past the JavaFX render pulse: retain it now and release the previously held
+      // "previous" buffer (served two updates ago, so its pulse has long since completed). Skipped when the polled slot
+      // hasn't advanced and when the reader doesn't use the pool.
+      retainPooledFrameBuffer(currentFrameData.frameBuffer);
+
       WritableImage currentFrame = currentFrameData.frame;
 
       // PixelBuffer-backed images (e.g. MagewellVideoDataReader) need an FX-thread updateBuffer to mark the dirty
@@ -295,6 +311,12 @@ public class VideoViewer
       thumbnailContainer.setPrefHeight(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize * currentFrame.getHeight() / currentFrame.getWidth());
 
       thumbnail.setImage(currentFrame);
+
+      playbackTracer.logServe(currentFrameData,
+                              currentFrameData.queryRobotTimestamp,
+                              currentFrameData.currentRobotTimestamp,
+                              currentFrameData.currentVideoTimestamp,
+                              currentFrameData.currentDemuxerTimestamp);
 
       if (updateVideoView.get())
       {
@@ -335,6 +357,36 @@ public class VideoViewer
       {
          videoWindowProperty.get().close();
          videoWindowProperty.set(null);
+      }
+      releaseHeldFrameBuffers();
+   }
+
+   /**
+    * Advances the two-deep ring of FX-held pooled buffers when a new buffer arrives. No-op when {@code newBuffer} is
+    * null (non-pooled reader) or identical to the currently held buffer (poll returned the same slot we already hold).
+    */
+   private void retainPooledFrameBuffer(FrameBuffer newBuffer)
+   {
+      if (newBuffer == null || newBuffer == fxHeldCurrent)
+         return;
+      if (fxHeldPrevious != null)
+         fxHeldPrevious.release();
+      fxHeldPrevious = fxHeldCurrent;
+      fxHeldCurrent = newBuffer;
+      fxHeldCurrent.retain();
+   }
+
+   private void releaseHeldFrameBuffers()
+   {
+      if (fxHeldPrevious != null)
+      {
+         fxHeldPrevious.release();
+         fxHeldPrevious = null;
+      }
+      if (fxHeldCurrent != null)
+      {
+         fxHeldCurrent.release();
+         fxHeldCurrent = null;
       }
    }
 

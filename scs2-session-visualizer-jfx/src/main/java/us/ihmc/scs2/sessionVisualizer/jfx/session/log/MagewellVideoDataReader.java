@@ -3,7 +3,6 @@ package us.ihmc.scs2.sessionVisualizer.jfx.session.log;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.PixelFormat;
-import javafx.scene.image.WritableImage;
 import javafx.scene.image.WritablePixelFormat;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.JavaFXFrameConverter;
@@ -12,6 +11,7 @@ import us.ihmc.robotDataLogger.Camera;
 import us.ihmc.scs2.session.log.MagewellScrubber;
 import us.ihmc.scs2.session.log.ProgressConsumer;
 import us.ihmc.scs2.session.log.TimestampScrubber;
+import us.ihmc.scs2.sessionVisualizer.jfx.session.log.VideoFrameBufferPool.FrameBuffer;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,6 +28,11 @@ public class MagewellVideoDataReader implements VideoDataReader
    // Fast-path BGRA->IntArgbPre aliasing depends on B,G,R,A native bytes packing into a 0xAARRGGBB int. True on
    // little-endian hosts (x86_64, aarch64); on big-endian we fall back to the JavaFXFrameConverter path.
    private static final boolean NATIVE_BYTE_ORDER_IS_LITTLE_ENDIAN = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
+   // Pool of reference-counted FrameBuffers shared across the ConcurrentCopier slots. The writer transfers its single
+   // reference to the slot on commit; VideoViewer retains an extra reference for the duration of the FX render pulse so
+   // the writer cannot overwrite a PixelBuffer that the JavaFX render thread may still be uploading. See
+   // VideoFrameBufferPool for the full rationale and the race condition that motivated the pool.
+   private final VideoFrameBufferPool bufferPool = new VideoFrameBufferPool();
    private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
 
    // Decode-throughput instrumentation. Written by the background decode thread inside
@@ -42,6 +47,8 @@ public class MagewellVideoDataReader implements VideoDataReader
    private long decodeWindowStartNanos = 0L;
    private int decodesInWindow = 0;
 
+   private final VideoPlaybackTracer playbackTracer;
+
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
       this(new MagewellScrubber(camera, dataDirectory, hasTimeBase));
@@ -53,6 +60,7 @@ public class MagewellVideoDataReader implements VideoDataReader
    protected MagewellVideoDataReader(MagewellScrubber magewellScrubber)
    {
       this.magewellScrubber = magewellScrubber;
+      this.playbackTracer = VideoPlaybackTracer.create(magewellScrubber.getName());
    }
 
    public int getImageHeight()
@@ -83,7 +91,14 @@ public class MagewellVideoDataReader implements VideoDataReader
       copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
       writeFrameIntoSlot(nextFrame, copyForWriting);
       imageBuffer.commit();
+      double decodeMillis = (System.nanoTime() - decodeStartNanos) / 1_000_000.0;
       updateDecodeStatistics(decodeStartNanos);
+      playbackTracer.logDecode(copyForWriting,
+                               copyForWriting.queryRobotTimestamp,
+                               copyForWriting.currentRobotTimestamp,
+                               copyForWriting.currentVideoTimestamp,
+                               copyForWriting.currentDemuxerTimestamp,
+                               decodeMillis);
    }
 
    private void updateDecodeStatistics(long decodeStartNanos)
@@ -124,14 +139,14 @@ public class MagewellVideoDataReader implements VideoDataReader
    }
 
    /**
-    * Decodes {@code frameToConvert} directly into the {@link PixelBuffer} backing the slot's {@link WritableImage}.
-    * Allocates (or reallocates) the buffer-backed image when the slot is empty or the frame dimensions changed.
-    * The pixel writes happen here (any thread); the consumer must call {@link PixelBuffer#updateBuffer} on the
-    * JavaFX Application Thread to publish the change for the next pulse.
+    * Decodes {@code frameToConvert} into a {@link FrameBuffer} acquired from {@link #bufferPool} and binds the slot to
+    * it. The slot's previous {@link FrameBuffer} (if any) is released back to the pool; the pixel writes happen here on
+    * the decode thread, and the consumer must call {@link PixelBuffer#updateBuffer} on the JavaFX Application Thread to
+    * publish the change for the next pulse.
     * <p>
     * When the upstream grabber is configured to deliver packed 4-channel byte frames (BGRA, as set on the NVDEC
     * demuxer's grabber), the bytes already match JavaFX's IntArgbPre layout on little-endian hosts and we copy them
-    * straight into the slot's direct ByteBuffer, skipping {@code JavaFXFrameConverter}'s
+    * straight into the buffer's direct ByteBuffer, skipping {@code JavaFXFrameConverter}'s
     * {@code BufferedImage -> WritableImage -> getPixels} round-trip. Planar / non-byte frames (e.g. NV12 from the
     * software MagewellDemuxer) take the converter fallback unchanged.
     */
@@ -151,15 +166,8 @@ public class MagewellVideoDataReader implements VideoDataReader
       int width = (int) currentImage.getWidth();
       int height = (int) currentImage.getHeight();
 
-      if (slot.pixelBuffer == null || (int) slot.frame.getWidth() != width || (int) slot.frame.getHeight() != height)
-      {
-         ByteBuffer backingBytes = ByteBuffer.allocateDirect(width * height * Integer.BYTES).order(ByteOrder.nativeOrder());
-         slot.pixelByteBuffer = backingBytes;
-         slot.pixelBuffer = new PixelBuffer<>(width, height, backingBytes.asIntBuffer(), ARGB_PRE_PIXEL_FORMAT);
-         slot.frame = new WritableImage(slot.pixelBuffer);
-      }
-
-      currentImage.getPixelReader().getPixels(0, 0, width, height, ARGB_PRE_PIXEL_FORMAT, slot.pixelBuffer.getBuffer(), width);
+      FrameBuffer buffer = bindFreshBufferToSlot(slot, width, height);
+      currentImage.getPixelReader().getPixels(0, 0, width, height, ARGB_PRE_PIXEL_FORMAT, buffer.pixelBuffer.getBuffer(), width);
    }
 
    /**
@@ -174,16 +182,10 @@ public class MagewellVideoDataReader implements VideoDataReader
       int sourceStrideBytes = frameToConvert.imageStride;
       int destStrideBytes = width * Integer.BYTES;
 
-      if (slot.pixelBuffer == null || (int) slot.frame.getWidth() != width || (int) slot.frame.getHeight() != height)
-      {
-         ByteBuffer backingBytes = ByteBuffer.allocateDirect(width * height * Integer.BYTES).order(ByteOrder.nativeOrder());
-         slot.pixelByteBuffer = backingBytes;
-         slot.pixelBuffer = new PixelBuffer<>(width, height, backingBytes.asIntBuffer(), ARGB_PRE_PIXEL_FORMAT);
-         slot.frame = new WritableImage(slot.pixelBuffer);
-      }
+      FrameBuffer buffer = bindFreshBufferToSlot(slot, width, height);
 
       ByteBuffer source = sourceBytes.duplicate();
-      ByteBuffer destination = slot.pixelByteBuffer;
+      ByteBuffer destination = buffer.pixelByteBuffer;
       destination.clear();
 
       if (sourceStrideBytes == destStrideBytes)
@@ -199,6 +201,26 @@ public class MagewellVideoDataReader implements VideoDataReader
             destination.put(source);
          }
       }
+   }
+
+   /**
+    * Acquires a fresh {@link FrameBuffer} from {@link #bufferPool}, releases the slot's previous buffer (if any), and
+    * binds the new buffer's {@link PixelBuffer} / {@link java.nio.ByteBuffer} / {@code WritableImage} into the slot's
+    * legacy fields so consumers that don't go through {@link FrameData#frameBuffer} keep working. The pool guarantees
+    * the returned buffer is not currently held by any other producer or consumer, so the decode thread can safely write
+    * its pixels.
+    */
+   private FrameBuffer bindFreshBufferToSlot(FrameData slot, int width, int height)
+   {
+      FrameBuffer previous = slot.frameBuffer;
+      FrameBuffer next = bufferPool.acquire(width, height);
+      slot.frameBuffer = next;
+      slot.pixelByteBuffer = next.pixelByteBuffer;
+      slot.pixelBuffer = next.pixelBuffer;
+      slot.frame = next.image;
+      if (previous != null)
+         previous.release();
+      return next;
    }
 
    public void cropVideo(File outputFile, File timestampFile, long startTimestamp, long endTimestamp, ProgressConsumer progressConsumer) throws IOException
