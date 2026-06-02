@@ -47,8 +47,6 @@ public class MagewellVideoDataReader implements VideoDataReader
    private long decodeWindowStartNanos = 0L;
    private int decodesInWindow = 0;
 
-   private final VideoPlaybackTracer playbackTracer;
-
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
       this(new MagewellScrubber(camera, dataDirectory, hasTimeBase));
@@ -60,7 +58,6 @@ public class MagewellVideoDataReader implements VideoDataReader
    protected MagewellVideoDataReader(MagewellScrubber magewellScrubber)
    {
       this.magewellScrubber = magewellScrubber;
-      this.playbackTracer = VideoPlaybackTracer.create(magewellScrubber.getName());
    }
 
    public int getImageHeight()
@@ -91,14 +88,7 @@ public class MagewellVideoDataReader implements VideoDataReader
       copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
       writeFrameIntoSlot(nextFrame, copyForWriting);
       imageBuffer.commit();
-      double decodeMillis = (System.nanoTime() - decodeStartNanos) / 1_000_000.0;
       updateDecodeStatistics(decodeStartNanos);
-      playbackTracer.logDecode(copyForWriting,
-                               copyForWriting.queryRobotTimestamp,
-                               copyForWriting.currentRobotTimestamp,
-                               copyForWriting.currentVideoTimestamp,
-                               copyForWriting.currentDemuxerTimestamp,
-                               decodeMillis);
    }
 
    private void updateDecodeStatistics(long decodeStartNanos)
@@ -205,18 +195,14 @@ public class MagewellVideoDataReader implements VideoDataReader
 
    /**
     * Acquires a fresh {@link FrameBuffer} from {@link #bufferPool}, releases the slot's previous buffer (if any), and
-    * binds the new buffer's {@link PixelBuffer} / {@link java.nio.ByteBuffer} / {@code WritableImage} into the slot's
-    * legacy fields so consumers that don't go through {@link FrameData#frameBuffer} keep working. The pool guarantees
-    * the returned buffer is not currently held by any other producer or consumer, so the decode thread can safely write
-    * its pixels.
+    * binds the new buffer into the slot. The pool guarantees the returned buffer is not currently held by any other
+    * producer or consumer, so the decode thread can safely write its pixels.
     */
    private FrameBuffer bindFreshBufferToSlot(FrameData slot, int width, int height)
    {
       FrameBuffer previous = slot.frameBuffer;
       FrameBuffer next = bufferPool.acquire(width, height);
       slot.frameBuffer = next;
-      slot.pixelByteBuffer = next.pixelByteBuffer;
-      slot.pixelBuffer = next.pixelBuffer;
       slot.frame = next.image;
       if (previous != null)
          previous.release();

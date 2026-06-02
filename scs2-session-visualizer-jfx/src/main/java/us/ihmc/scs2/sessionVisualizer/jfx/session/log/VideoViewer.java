@@ -75,8 +75,6 @@ public class VideoViewer
 
    private final ObjectProperty<Pane> imageViewRootPane = new SimpleObjectProperty<>(this, "imageViewRootPane", null);
 
-   private final VideoPlaybackTracer playbackTracer;
-
    // FX-side ref-count holders for pooled FrameBuffers. We keep the two most-recently-served buffers alive: when a new
    // buffer arrives at update() #N+2, we release the one served at #N -- by then the JavaFX render pulse for #N has
    // long since completed, so the writer can safely recycle the buffer without tearing the displayed frame. Null for
@@ -88,7 +86,6 @@ public class VideoViewer
    {
       this.reader = reader;
       this.defaultThumbnailSize = defaultThumbnailSize;
-      this.playbackTracer = VideoPlaybackTracer.create(reader.getName());
       thumbnail.setPreserveRatio(true);
       videoView.setPreserveRatio(true);
       thumbnail.setFitWidth(defaultThumbnailSize);
@@ -302,21 +299,15 @@ public class VideoViewer
       WritableImage currentFrame = currentFrameData.frame;
 
       // PixelBuffer-backed images (e.g. MagewellVideoDataReader) need an FX-thread updateBuffer to mark the dirty
-      // region for the next pulse; setPixels-based readers leave pixelBuffer null and rely on JavaFX's own dirty
+      // region for the next pulse; setPixels-based readers leave frameBuffer null and rely on JavaFX's own dirty
       // tracking.
-      if (currentFrameData.pixelBuffer != null)
-         currentFrameData.pixelBuffer.updateBuffer(b -> null);
+      if (currentFrameData.frameBuffer != null)
+         currentFrameData.frameBuffer.pixelBuffer.updateBuffer(b -> null);
 
       thumbnailContainer.setPrefWidth(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize);
       thumbnailContainer.setPrefHeight(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize * currentFrame.getHeight() / currentFrame.getWidth());
 
       thumbnail.setImage(currentFrame);
-
-      playbackTracer.logServe(currentFrameData,
-                              currentFrameData.queryRobotTimestamp,
-                              currentFrameData.currentRobotTimestamp,
-                              currentFrameData.currentVideoTimestamp,
-                              currentFrameData.currentDemuxerTimestamp);
 
       if (updateVideoView.get())
       {
