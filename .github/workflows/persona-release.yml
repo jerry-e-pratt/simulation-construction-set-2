@@ -1,0 +1,100 @@
+name: Persona Release
+
+# Builds the Debian package and publishes a GitHub release with the .deb attached
+# whenever a Persona fork tag is pushed. Tag names must contain "persona" (e.g.
+# 17-0.32.1-persona2) so they never collide with upstream's plain version tags.
+#
+# Usage:
+#   git tag 17-0.32.1-persona2
+#   git push origin 17-0.32.1-persona2
+# The tag name becomes the build version (a leading "v" is stripped), so there is
+# no need to commit a group.gradle.properties bump first.
+
+on:
+  push:
+    tags:
+      - '*-persona*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Persona version to build and release (e.g. 17-0.32.1-persona2)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-package: 'jdk'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Strip an optional leading "v" from the tag (refs/tags/<name> -> <name>)
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not determine version"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building Persona version: $VERSION"
+
+      - name: Pin fork version
+        run: |
+          sed -i "s/^version=.*/version=${{ steps.version.outputs.version }}/" group.gradle.properties
+          grep '^version=' group.gradle.properties
+
+      - name: Build Debian package
+        run: ./gradlew :scs2-session-visualizer-jfx:buildDebianPackage --no-daemon --stacktrace
+
+      - name: Locate .deb
+        id: deb
+        run: |
+          DEB=$(ls scs2-session-visualizer-jfx/deployment/debian/*.deb | head -n1)
+          if [ -z "$DEB" ]; then
+            echo "::error::No .deb produced"; exit 1
+          fi
+          echo "path=$DEB" >> "$GITHUB_OUTPUT"
+          echo "Built: $DEB"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.version }}"
+          # workflow_dispatch has no tag ref, so make sure one exists for the release.
+          # Tags pushed with GITHUB_TOKEN do not re-trigger this workflow.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git tag "$TAG" "${{ github.sha }}" 2>/dev/null || true
+            git push origin "$TAG" 2>/dev/null || true
+          fi
+          NOTES="Automated Persona fork build for \`$TAG\`.
+
+          Install:
+          \`\`\`
+          sudo dpkg -i $(basename "${{ steps.deb.outputs.path }}")
+          \`\`\`
+          Installs to \`/opt/$TAG/\` (launcher: \`/opt/$TAG/bin/SCS2SessionVisualizer\`)."
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${{ steps.deb.outputs.path }}" --clobber --repo "${{ github.repository }}"
+          else
+            gh release create "$TAG" "${{ steps.deb.outputs.path }}" \
+              --repo "${{ github.repository }}" \
+              --title "SCS2 $TAG (Persona fork)" \
+              --notes "$NOTES"
+          fi
