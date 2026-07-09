@@ -91,3 +91,10 @@
 **/.apdisk
 **/rebel.xml
 **/generatedTestSuites/*TestSuite.java
+
+# --- Merlin / Claude agentic files (local-only on this machine; not pushed) ---
+# Merlinized 2026-07-08. The agentic scaffold and MCP/attributes config stay local
+# for now — see Merlin's "gitignore .claude/" interim (project not yet a nested repo).
+.claude/
+.mcp.json
+.gitattributes
