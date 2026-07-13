@@ -55,6 +55,31 @@ public class YoChartPanelController extends ObservedAnimationTimer implements Vi
 {
    private static final long LEGEND_UPDATE_PERIOD = TimeUnit.MILLISECONDS.toNanos(100);
 
+   // Persona-fork perf cap: the CHART panels' visual refresh (series render + time-bar/markers) is
+   // throttled to CHART_UPDATE_RATE_HZ (default 15 Hz) instead of running every JavaFX pulse (~60 Hz).
+   // This is the mitigation for multi-window playback stutter: with many chart windows the JavaFX
+   // thread blocks presenting each window's scene every frame, so rendering charts at ~15 Hz halves the
+   // chart-window present load. The 3D scene and video are NOT affected by this (they stay at full rate);
+   // this only gates chart rendering (updateChart/updateMarkers) in this single chart panel.
+   // Override without rebuilding via the system property -Dscs2.chart.updateRateHz=<hz>.
+   private static final double CHART_UPDATE_RATE_HZ = parseChartUpdateRateHz();
+   private static final long CHART_UPDATE_PERIOD = (long) (1.0e9 / CHART_UPDATE_RATE_HZ); // nanoseconds
+
+   private static double parseChartUpdateRateHz()
+   {
+      try
+      {
+         double rate = Double.parseDouble(System.getProperty("scs2.chart.updateRateHz", "15"));
+         if (rate > 0.0 && !Double.isInfinite(rate) && !Double.isNaN(rate))
+            return rate;
+      }
+      catch (NumberFormatException e)
+      {
+         // fall through to default
+      }
+      return 15.0;
+   }
+
    private static final String INPOINT_MARKER_STYLECLASS = "chart-inpoint-marker";
    private static final String OUTPOINT_MARKER_STYLECLASS = "chart-outpoint-marker";
    private static final String CURRENT_INDEX_MARKER_STYLECLASS = "chart-current-index-marker";
@@ -448,6 +473,7 @@ public class YoChartPanelController extends ObservedAnimationTimer implements Vi
    }
 
    private long legendUpdateLastTime = -1L;
+   private long chartUpdateLastTime = -1L;
 
    @Override
    public void handleImpl(long now)
@@ -490,9 +516,17 @@ public class YoChartPanelController extends ObservedAnimationTimer implements Vi
          xAxis.setUpperBound(chartsBounds.getUpper() + scale * chartsBounds.length());
       }
 
-      charts.values().forEach(YoVariableChartPackage::updateChart);
-      if (!dynamicLineChart.markerAutoUpdateProperty().get())
-         dynamicLineChart.updateMarkers();
+      // Persona-fork perf cap: throttle the chart's visual refresh to ~15 Hz (see CHART_UPDATE_PERIOD).
+      // Only the series render and time-bar/marker redraw are gated; the marker-coordinate and x-axis
+      // bound updates above run every pulse (cheap, dirty-only) so zoom/scroll stay responsive.
+      boolean updateCharts = chartUpdateLastTime == -1L || now - chartUpdateLastTime >= CHART_UPDATE_PERIOD;
+      if (updateCharts)
+      {
+         chartUpdateLastTime = now;
+         charts.values().forEach(YoVariableChartPackage::updateChart);
+         if (!dynamicLineChart.markerAutoUpdateProperty().get())
+            dynamicLineChart.updateMarkers();
+      }
    }
 
    private ContextMenu newGraphContextMenu()
