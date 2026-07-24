@@ -238,12 +238,17 @@ public class DynamicLineChart extends DynamicXYChart
       // Measure the per-variable axes to stack on the left; only shown when individual-scaling and toggled on.
       boolean showPerVariableAxes = showYAxisProperty.get() && chartStyleProperty.get() == ChartStyle.NORMALIZED;
       double perVariableTotalWidth = 0.0;
-      for (PerVariableYAxis perVariableYAxis : perSeriesYAxes)
+      double[] perVariableAxisWidths = new double[perSeriesYAxes.size()];
+      for (int i = 0; i < perSeriesYAxes.size(); i++)
       {
+         PerVariableYAxis perVariableYAxis = perSeriesYAxes.get(i);
          boolean visible = showPerVariableAxes && perVariableYAxis.hasRealBounds();
          perVariableYAxis.setVisible(visible);
          if (visible)
-            perVariableTotalWidth += Math.ceil(perVariableYAxis.prefWidth(height));
+         {
+            perVariableAxisWidths[i] = Math.ceil(perVariableYAxis.prefWidth(height));
+            perVariableTotalWidth += perVariableAxisWidths[i];
+         }
       }
 
       // try and work out width and height of axises
@@ -279,11 +284,12 @@ public class DynamicLineChart extends DynamicXYChart
 
       // Stack the per-variable axes to the left of the primary Y-axis: series 0 innermost, series N outermost.
       double axisCursor = left + perVariableTotalWidth;
-      for (PerVariableYAxis perVariableYAxis : perSeriesYAxes)
+      for (int i = 0; i < perSeriesYAxes.size(); i++)
       {
+         PerVariableYAxis perVariableYAxis = perSeriesYAxes.get(i);
          if (!perVariableYAxis.isVisible())
             continue;
-         double axisWidth = Math.ceil(perVariableYAxis.prefWidth(yAxisHeight));
+         double axisWidth = perVariableAxisWidths[i];
          axisCursor -= axisWidth;
          perVariableYAxis.resizeRelocate(axisCursor, top, axisWidth, yAxisHeight);
          perVariableYAxis.requestAxisLayout();
