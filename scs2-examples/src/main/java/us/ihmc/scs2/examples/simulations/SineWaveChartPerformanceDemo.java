@@ -3,7 +3,9 @@ package us.ihmc.scs2.examples.simulations;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicLong;
 
+import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.geometry.Rectangle2D;
 import javafx.stage.Screen;
@@ -29,12 +31,25 @@ import us.ihmc.yoVariables.variable.YoDouble;
  * It exposes a handful of sine-wave {@link YoDouble}s that are updated every tick, launches the Session
  * Visualizer, then opens a configurable number of <b>secondary chart windows</b> spread across the primary
  * screen, each holding several charts. It records a fixed slice of data into the buffer and then <b>plays that
- * buffer back</b>, measuring the achieved playback rate. The goal is to reproduce and investigate a
- * playback-rate regression where opening more chart windows slows playback even when the charts contain no
- * plotted series &mdash; the moving vertical time-bar cursor redrawn by every chart in every window is the
- * suspected cost. The {@code --empty} flag exists precisely for that investigation: it creates chart panels
- * with no data series so the only per-frame work is the time-bar cursor, isolating that cost from the cost of
- * actually rendering series data.
+ * buffer back</b>, measuring two distinct things:
+ * </p>
+ * <ul>
+ * <li><b>Buffered-time playback rate</b> (the <i>clock</i>): how fast buffered simulation time advances per
+ * wall-clock second. This is the control &mdash; it confirms the playback clock itself keeps running at
+ * &asymp;1.0x even when the GUI feels laggy.</li>
+ * <li><b>Effective JavaFX frame rate</b> (the <i>smoothness</i>): how many JavaFX pulses the whole GUI actually
+ * renders per wall-clock second, counted via an {@link AnimationTimer}. This is the metric that captures the
+ * reported problem: the JavaFX Application Thread runs a single pulse loop shared by every window, so under
+ * load pulses are dropped and the effective frame rate falls &mdash; the "playback lag" is <b>visual stutter
+ * (dropped frames)</b>, not the playback clock slowing down. The contrast between a steady &asymp;1.0x
+ * buffered-time rate and a collapsing frame rate is the key result.</li>
+ * </ul>
+ * <p>
+ * The goal is to reproduce and investigate a regression where opening more chart windows degrades playback
+ * smoothness even when the charts contain no plotted series &mdash; the moving vertical time-bar cursor
+ * redrawn by every chart in every window is the suspected cost. The {@code --empty} flag exists precisely for
+ * that investigation: it creates chart panels with no data series so the only per-frame work is the time-bar
+ * cursor, isolating that cost from the cost of actually rendering series data.
  * </p>
  * <p>
  * Chart windows are driven directly through the {@link SecondaryWindowManager} (rather than
@@ -63,8 +78,11 @@ import us.ihmc.yoVariables.variable.YoDouble;
  * variable. Buffered-time deltas that go backward (playback wrapping around the looping buffer) are skipped.
  * Samples taken during the first {@code --warmup W} seconds (default 3.0) are discarded to exclude the initial
  * catch-up spikes and JIT warm-up; the summary (windows, charts/window, total charts, vars, empty?, fill
- * seconds, buffered-time advanced, wall span, the overall achieved rate, and mean/median/min/max of the valid
- * interval rates) is computed over the post-warm-up window only. It then shuts the session down and calls
+ * seconds, buffered-time advanced, wall span, the overall achieved rate, mean/median/min/max of the valid
+ * interval rates, and mean/median/min/max of the effective JavaFX frame rate) is computed over the
+ * post-warm-up window only. The frame rate is derived from an {@link AnimationTimer} that increments a counter
+ * once per JavaFX pulse; per-interval it is simply the frame-count delta over the wall-clock delta (frame
+ * counts are monotonic, so no intervals are skipped). It then shuts the session down and calls
  * {@link System#exit(int)}. Intended to be launched under a JVM profiler. Example:
  *
  * <pre>
@@ -189,9 +207,31 @@ public class SineWaveChartPerformanceDemo
       // Open and populate the secondary chart windows on the JavaFX Application Thread.
       openChartWindows(scs, numberOfWindows, chartsPerWindow, numberOfVars, emptyCharts, sines);
 
+      // Effective-frame-rate probe: an AnimationTimer fires once per JavaFX pulse, so incrementing this counter
+      // per handle() call turns it into a running tally of pulses (= frames) the whole GUI has rendered. The
+      // auto-mode sampler reads it to compute the effective JavaFX frame rate. AnimationTimer.start() must run
+      // on the FX thread, so it is scheduled via Platform.runLater(...).
+      final AtomicLong frameCounter = new AtomicLong();
+      Platform.runLater(() ->
+      {
+         AnimationTimer frameRateTimer = new AnimationTimer()
+         {
+            @Override
+            public void handle(long now)
+            {
+               frameCounter.incrementAndGet();
+            }
+         };
+         frameRateTimer.start();
+      });
+
       // Fill the buffer deterministically and as fast as possible (not real-time). simulateNow runs
       // synchronously on this thread and records each tick into the buffer.
       long fillTicks = Math.round(fillSeconds / dt);
+      // Size the buffer to hold the whole fill so playback does not loop every fraction of a second (which
+      // would otherwise wrap the buffered-time cursor constantly). changeBufferSize is a public control on
+      // SimulationConstructionSet2; cap at Integer.MAX_VALUE for safety.
+      scs.changeBufferSize((int) Math.min(fillTicks + 1L, Integer.MAX_VALUE));
       System.out.println("Filling buffer with " + fillTicks + " ticks (" + fillSeconds + " s at dt=" + dt + ") ...");
       scs.simulateNow(fillTicks);
       System.out.println("Buffer filled. Starting playback.");
@@ -204,6 +244,7 @@ public class SineWaveChartPerformanceDemo
       if (autoMode)
          runAutoModeThenExit(scs,
                              timeEcho,
+                             frameCounter,
                              autoDurationSeconds,
                              warmupSeconds,
                              numberOfWindows,
@@ -329,18 +370,25 @@ public class SineWaveChartPerformanceDemo
    }
 
    /**
-    * Measures the achieved playback rate for {@code durationSeconds} by watching how fast buffered simulation
-    * time advances, discards the samples taken during the first {@code warmupSeconds}, prints a summary over
-    * the retained samples, then shuts down and exits the JVM.
+    * Measures both the achieved playback rate and the effective JavaFX frame rate for {@code durationSeconds}
+    * by watching how fast buffered simulation time advances and how many JavaFX pulses are rendered, discards
+    * the samples taken during the first {@code warmupSeconds}, prints a summary over the retained samples, then
+    * shuts down and exits the JVM.
     * <p>
     * {@code timeEcho} mirrors the simulation time into the buffer on every tick; during playback it is
     * restored from the buffer, so its live value equals the buffered simulation time at the current playback
     * index. Sampling it against wall-clock time therefore yields the achieved playback rate without relying on
     * any internal statistics variable.
     * </p>
+    * <p>
+    * {@code frameCounter} is incremented once per JavaFX pulse by an {@link AnimationTimer}; its delta over the
+    * wall-clock delta between two samples is the effective frame rate the whole GUI is achieving. Unlike the
+    * buffered-time rate, the frame count is monotonic, so no intervals are skipped.
+    * </p>
     */
    private static void runAutoModeThenExit(SimulationConstructionSet2 scs,
                                            YoDouble timeEcho,
+                                           AtomicLong frameCounter,
                                            double durationSeconds,
                                            double warmupSeconds,
                                            int numberOfWindows,
@@ -364,6 +412,7 @@ public class SineWaveChartPerformanceDemo
       // each sample. Reading a double written by the playback thread is safe enough for this coarse timing.
       List<Double> retainedWallSec = new ArrayList<>();
       List<Double> retainedBufTime = new ArrayList<>();
+      List<Long> retainedFrames = new ArrayList<>();
       int discardedWarmupSamples = 0;
 
       while (System.currentTimeMillis() < endTimeMillis)
@@ -387,8 +436,10 @@ public class SineWaveChartPerformanceDemo
 
          double wallSec = System.nanoTime() * 1e-9;
          double bufTime = timeEcho.getValue();
+         long frames = frameCounter.get();
          retainedWallSec.add(wallSec);
          retainedBufTime.add(bufTime);
+         retainedFrames.add(frames);
       }
 
       int sampleCount = retainedWallSec.size();
@@ -415,8 +466,20 @@ public class SineWaveChartPerformanceDemo
             intervalRates.add(bufDelta / wallDelta);
       }
 
+      // Effective JavaFX frame rate: the frame count is monotonic, so every interval is a valid data point
+      // (no skipping). Per interval it is the frame-count delta over the wall-clock delta.
+      List<Double> fpsSamples = new ArrayList<>();
+      for (int i = 1; i < sampleCount; i++)
+      {
+         double frameDelta = retainedFrames.get(i) - retainedFrames.get(i - 1);
+         double wallDelta = retainedWallSec.get(i) - retainedWallSec.get(i - 1);
+         if (wallDelta > 0.0)
+            fpsSamples.add(frameDelta / wallDelta);
+      }
+
       double wallSpanSeconds = sampleCount >= 2 ? retainedWallSec.get(sampleCount - 1) - retainedWallSec.get(0) : 0.0;
       double overallRate = wallSpanSeconds > 0.0 ? bufTimeAdvanced / wallSpanSeconds : Double.NaN;
+      long framesCounted = sampleCount >= 2 ? retainedFrames.get(sampleCount - 1) - retainedFrames.get(0) : 0L;
 
       System.out.println("======================== AUTO-MODE SUMMARY =============================");
       System.out.println("  chart windows               : " + numberOfWindows);
@@ -435,6 +498,10 @@ public class SineWaveChartPerformanceDemo
       System.out.println("  overall achieved rate       : " + format(overallRate));
       System.out.println("  interval rate        : mean=" + format(mean(intervalRates)) + "  median=" + format(median(intervalRates))
                          + "  min=" + format(min(intervalRates)) + "  max=" + format(max(intervalRates)));
+      System.out.println("  effective FPS        : mean=" + format(mean(fpsSamples)) + "  median=" + format(median(fpsSamples))
+                         + "  min=" + format(min(fpsSamples)) + "  max=" + format(max(fpsSamples)));
+      System.out.println("  frames counted              : " + framesCounted);
+      System.out.println("  measurement wall span (s)   : " + format(wallSpanSeconds));
       System.out.println("========================================================================");
 
       if (bufTimeAdvanced <= 1.0e-9)
