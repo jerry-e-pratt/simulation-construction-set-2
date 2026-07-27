@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Build and launch the SCS2 Session Visualizer (no log loaded).
+#
+# Step 1: build the visualizer distribution via installDist.
+# Step 2: run the generated entrypoint script with no -l argument.
+#
+# Notes for this box:
+#   - Uses the system `gradle` (the ./gradlew wrapper jar is absent in this checkout).
+#   - __GL_SYNC_TO_VBLANK=0 disables driver VSync to avoid multi-window playback stutter
+#     on the RTX 5090 (the installDist launcher already passes -Dprism.vsync=false).
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_DIR"
+
+# Step 1: build the distribution.
+gradle :scs2-session-visualizer-jfx:installDist
+
+# Step 2: launch, no log.
+export __GL_SYNC_TO_VBLANK=0
+exec scs2-session-visualizer-jfx/build/install/scs2-session-visualizer-jfx/bin/SCS2SessionVisualizer "$@"
