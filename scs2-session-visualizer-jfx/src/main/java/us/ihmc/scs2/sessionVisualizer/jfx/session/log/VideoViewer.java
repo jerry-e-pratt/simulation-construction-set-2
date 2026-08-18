@@ -222,7 +222,7 @@ public class VideoViewer
       perfOverlayLabel.setTextFill(Color.LIME);
       perfOverlayLabel.setBackground(new Background(new BackgroundFill(Color.color(0, 0, 0, 0.55), CornerRadii.EMPTY, Insets.EMPTY)));
       perfOverlayLabel.setPadding(new Insets(2, 6, 2, 6));
-      perfOverlayLabel.setText("served --  decode -- @ -- ms  source -- fps");
+      perfOverlayLabel.setText("served --  decode -- @ -- ms  source -- fps  dec --x--");
       anchorPane.getChildren().add(perfOverlayLabel);
       AnchorPane.setTopAnchor(perfOverlayLabel, 4.0);
       AnchorPane.setRightAnchor(perfOverlayLabel, 4.0);
@@ -318,11 +318,13 @@ public class VideoViewer
          currentDemuxerTimestampLabel.setText(Long.toString(currentFrameData.currentDemuxerTimestamp));
 
          updateServedFps(currentFrameData.currentVideoTimestamp);
-         perfOverlayLabel.setText(String.format("served %s  decode %s @ %s ms  source %s fps",
+         perfOverlayLabel.setText(String.format("served %s  decode %s @ %s ms  source %s fps  dec %dx%d",
                                                 formatFps(servedFpsHz),
                                                 formatFps(reader.getDecodeRateHz()),
                                                 formatMillis(reader.getDecodeTimeMillis()),
-                                                formatFps(reader.getSourceFrameRateHz())));
+                                                formatFps(reader.getSourceFrameRateHz()),
+                                                reader.getImageWidth(),
+                                                reader.getImageHeight()));
 
          if (imageViewRootPane.get() != null)
          {

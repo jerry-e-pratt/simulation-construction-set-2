@@ -18,6 +18,8 @@ import us.ihmc.scs2.sessionVisualizer.jfx.session.log.VideoFrameBufferPool.Frame
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 
 public class MagewellVideoDataReader implements VideoDataReader
@@ -29,6 +31,9 @@ public class MagewellVideoDataReader implements VideoDataReader
    private final ConcurrentCopier<FrameData> imageBuffer = new ConcurrentCopier<>(FrameData::new);
    // PixelBuffer requires premultiplied alpha; video frames are opaque so this is a no-op vs. non-premultiplied.
    private static final WritablePixelFormat<IntBuffer> ARGB_PRE_PIXEL_FORMAT = PixelFormat.getIntArgbPreInstance();
+   // Fast-path BGRA->IntArgbPre aliasing depends on B,G,R,A native bytes packing into a 0xAARRGGBB int. True on
+   // little-endian hosts (x86_64, aarch64); on big-endian we fall back to the JavaFXFrameConverter path.
+   private static final boolean NATIVE_BYTE_ORDER_IS_LITTLE_ENDIAN = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
    // Pool of reference-counted FrameBuffers shared across the ConcurrentCopier slots. The writer transfers its single
    // reference to the slot on commit; VideoViewer retains an extra reference for the duration of the FX render pulse so
    // the writer cannot overwrite a PixelBuffer that the JavaFX render thread may still be uploading. See
@@ -50,7 +55,15 @@ public class MagewellVideoDataReader implements VideoDataReader
 
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
-      magewellScrubber = new MagewellScrubber(camera, dataDirectory, hasTimeBase);
+      this(new MagewellScrubber(camera, dataDirectory, hasTimeBase));
+   }
+
+   /**
+    * Scrubber-injecting overload for subclasses that supply a non-default scrubber (e.g. NVDEC-backed).
+    */
+   protected MagewellVideoDataReader(MagewellScrubber magewellScrubber)
+   {
+      this.magewellScrubber = magewellScrubber;
    }
 
    public int getImageHeight()
@@ -126,15 +139,64 @@ public class MagewellVideoDataReader implements VideoDataReader
     * it. The slot's previous {@link FrameBuffer} (if any) is released back to the pool; the pixel writes happen here on
     * the decode thread, and the consumer must call {@link PixelBuffer#updateBuffer} on the JavaFX Application Thread to
     * publish the change for the next pulse.
+    * <p>
+    * When the upstream grabber is configured to deliver packed 4-channel byte frames (BGRA, as set on the NVDEC
+    * demuxer's grabber), the bytes already match JavaFX's IntArgbPre layout on little-endian hosts and we copy them
+    * straight into the buffer's direct ByteBuffer, skipping {@code JavaFXFrameConverter}'s
+    * {@code BufferedImage -> WritableImage -> getPixels} round-trip. Planar / non-byte frames (e.g. NV12 from the
+    * software MagewellDemuxer) take the converter fallback unchanged.
     */
    private void writeFrameIntoSlot(Frame frameToConvert, FrameData slot)
    {
+      if (NATIVE_BYTE_ORDER_IS_LITTLE_ENDIAN
+          && frameToConvert.image != null
+          && frameToConvert.image.length == 1
+          && frameToConvert.imageChannels == 4
+          && frameToConvert.image[0] instanceof ByteBuffer sourceBytes)
+      {
+         writePackedBgraIntoSlot(frameToConvert, sourceBytes, slot);
+         return;
+      }
+
       Image currentImage = frameConverter.convert(frameToConvert);
       int width = (int) currentImage.getWidth();
       int height = (int) currentImage.getHeight();
 
       FrameBuffer buffer = bindFreshBufferToSlot(slot, width, height);
       currentImage.getPixelReader().getPixels(0, 0, width, height, ARGB_PRE_PIXEL_FORMAT, buffer.pixelBuffer.getBuffer(), width);
+   }
+
+   /**
+    * Fast path for packed BGRA frames. {@code frame.imageStride} is the row stride in bytes (from FFmpeg's
+    * {@code AVFrame.linesize[0]}); when the source rows are tightly packed we do a single bulk transfer, otherwise
+    * we copy row-by-row to handle padded rows.
+    */
+   private void writePackedBgraIntoSlot(Frame frameToConvert, ByteBuffer sourceBytes, FrameData slot)
+   {
+      int width = frameToConvert.imageWidth;
+      int height = frameToConvert.imageHeight;
+      int sourceStrideBytes = frameToConvert.imageStride;
+      int destStrideBytes = width * Integer.BYTES;
+
+      FrameBuffer buffer = bindFreshBufferToSlot(slot, width, height);
+
+      ByteBuffer source = sourceBytes.duplicate();
+      ByteBuffer destination = buffer.pixelByteBuffer;
+      destination.clear();
+
+      if (sourceStrideBytes == destStrideBytes)
+      {
+         source.position(0).limit(destStrideBytes * height);
+         destination.put(source);
+      }
+      else
+      {
+         for (int y = 0; y < height; y++)
+         {
+            source.limit(y * sourceStrideBytes + destStrideBytes).position(y * sourceStrideBytes);
+            destination.put(source);
+         }
+      }
    }
 
    /**
