@@ -3,6 +3,7 @@ package us.ihmc.scs2.sessionVisualizer.jfx.session.mcap;
 import org.bytedeco.ffmpeg.global.avutil;
 import us.ihmc.log.LogTools;
 import us.ihmc.scs2.sessionVisualizer.jfx.managers.BackgroundExecutorManager;
+import us.ihmc.scs2.sessionVisualizer.jfx.session.LatestTimestampBackgroundExecutor;
 
 import java.io.File;
 import java.io.IOException;
@@ -10,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Future;
 
 public class FFMPEGMultiVideoDataReader
 {
@@ -21,12 +21,11 @@ public class FFMPEGMultiVideoDataReader
    }
 
    private final List<FFMPEGVideoDataReader> readers = new ArrayList<>();
-   private final BackgroundExecutorManager backgroundExecutorManager;
-   private Future<?> currentTask = null;
+   private final LatestTimestampBackgroundExecutor backgroundReader;
 
    public FFMPEGMultiVideoDataReader(File dataDirectory, BackgroundExecutorManager backgroundExecutorManager)
    {
-      this.backgroundExecutorManager = backgroundExecutorManager;
+      this.backgroundReader = new LatestTimestampBackgroundExecutor(backgroundExecutorManager, this::readVideoFrameNow);
       List<Path> videoFiles;
       LogTools.info("Searching for videos in {}", dataDirectory.getAbsolutePath());
       if (dataDirectory.isDirectory())
@@ -57,8 +56,7 @@ public class FFMPEGMultiVideoDataReader
 
    public void readVideoFrameInBackground(long timestamp)
    {
-      if (currentTask == null || currentTask.isDone())
-         currentTask = backgroundExecutorManager.executeInBackground(() -> readVideoFrameNow(timestamp));
+      backgroundReader.submit(timestamp);
    }
 
    public int getNumberOfVideos()

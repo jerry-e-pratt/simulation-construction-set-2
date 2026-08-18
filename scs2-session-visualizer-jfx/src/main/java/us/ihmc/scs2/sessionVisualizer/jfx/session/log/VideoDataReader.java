@@ -38,4 +38,34 @@ public interface VideoDataReader
    {
       return null;
    }
+
+   /**
+    * Rolling estimate of how many image-bearing video frames per second the reader is producing
+    * (i.e. how often {@link #readVideoFrame(long)} actually decodes a new frame, ignoring early
+    * returns when the requested PTS matched the previous read). Returns {@link Double#NaN} when
+    * the reader does not track this metric or has not yet produced enough samples.
+    */
+   default double getDecodeRateHz()
+   {
+      return Double.NaN;
+   }
+
+   /**
+    * EWMA estimate of the wall-clock time spent inside a single decode-bearing
+    * {@link #readVideoFrame(long)} call, in milliseconds. Returns {@link Double#NaN} when the
+    * reader does not track this metric or has not yet produced any samples.
+    */
+   default double getDecodeTimeMillis()
+   {
+      return Double.NaN;
+   }
+
+   /**
+    * Nominal frame rate reported by the underlying video container, in Hz. Returns
+    * {@link Double#NaN} when the reader does not expose this.
+    */
+   default double getSourceFrameRateHz()
+   {
+      return Double.NaN;
+   }
 }

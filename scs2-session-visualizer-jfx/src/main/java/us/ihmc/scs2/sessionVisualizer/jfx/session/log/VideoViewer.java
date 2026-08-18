@@ -39,6 +39,7 @@ import javafx.stage.Window;
 import javafx.util.Duration;
 import us.ihmc.scs2.session.SessionPropertiesHelper;
 import us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizerIOTools;
+import us.ihmc.scs2.sessionVisualizer.jfx.session.log.VideoFrameBufferPool.FrameBuffer;
 import us.ihmc.scs2.sessionVisualizer.jfx.tools.JavaFXMissingTools;
 
 public class VideoViewer
@@ -57,12 +58,29 @@ public class VideoViewer
    private final Label currentVideoTimestampLabel = new Label();
    private final Label currentRobotTimestampLabel = new Label();
 
+   // Always-on performance overlay: served fps is computed from currentVideoTimestamp transitions
+   // observed by the FX-thread update() loop, decode rate / time / source fps are forwarded from
+   // the reader. Lets the user distinguish session-tick bottlenecks from decode-pipeline bottlenecks.
+   private final Label perfOverlayLabel = new Label();
+   private static final long SERVED_FPS_WINDOW_NANOS = 1_000_000_000L;
+   private long lastSeenVideoTimestamp = Long.MIN_VALUE;
+   private long servedWindowStartNanos = 0L;
+   private int servedFramesInWindow = 0;
+   private double servedFpsHz = Double.NaN;
+
    private final BooleanProperty updateVideoView = new SimpleBooleanProperty(this, "updateVideoView", false);
    private final ObjectProperty<Stage> videoWindowProperty = new SimpleObjectProperty<>(this, "videoWindow", null);
    private final VideoDataReader reader;
    private final double defaultThumbnailSize;
 
    private final ObjectProperty<Pane> imageViewRootPane = new SimpleObjectProperty<>(this, "imageViewRootPane", null);
+
+   // FX-side ref-count holders for pooled FrameBuffers. We keep the two most-recently-served buffers alive: when a new
+   // buffer arrives at update() #N+2, we release the one served at #N -- by then the JavaFX render pulse for #N has
+   // long since completed, so the writer can safely recycle the buffer without tearing the displayed frame. Null for
+   // readers that don't go through VideoFrameBufferPool (BlackMagic, ZED), in which case no retain/release happens.
+   private FrameBuffer fxHeldCurrent = null;
+   private FrameBuffer fxHeldPrevious = null;
 
    public VideoViewer(Window owner, VideoDataReader reader, double defaultThumbnailSize)
    {
@@ -111,6 +129,7 @@ public class VideoViewer
             imageViewRootPane.set(root);
 
             setupVideoStatistics(anchorPane);
+            setupPerformanceOverlay(anchorPane);
 
             videoWindowProperty.set(stage);
             stage.getIcons().add(SessionVisualizerIOTools.LOG_SESSION_IMAGE);
@@ -197,6 +216,46 @@ public class VideoViewer
       }
    }
 
+   private void setupPerformanceOverlay(AnchorPane anchorPane)
+   {
+      perfOverlayLabel.setFont(Font.font("Monospaced", FontWeight.BOLD, 12));
+      perfOverlayLabel.setTextFill(Color.LIME);
+      perfOverlayLabel.setBackground(new Background(new BackgroundFill(Color.color(0, 0, 0, 0.55), CornerRadii.EMPTY, Insets.EMPTY)));
+      perfOverlayLabel.setPadding(new Insets(2, 6, 2, 6));
+      perfOverlayLabel.setText("served --  decode -- @ -- ms  source -- fps");
+      anchorPane.getChildren().add(perfOverlayLabel);
+      AnchorPane.setTopAnchor(perfOverlayLabel, 4.0);
+      AnchorPane.setRightAnchor(perfOverlayLabel, 4.0);
+   }
+
+   private void updateServedFps(long currentVideoTimestamp)
+   {
+      if (currentVideoTimestamp == lastSeenVideoTimestamp)
+         return;
+      long nowNanos = System.nanoTime();
+      if (servedWindowStartNanos == 0L)
+         servedWindowStartNanos = nowNanos;
+      servedFramesInWindow++;
+      long elapsedNanos = nowNanos - servedWindowStartNanos;
+      if (elapsedNanos >= SERVED_FPS_WINDOW_NANOS)
+      {
+         servedFpsHz = servedFramesInWindow * 1_000_000_000.0 / elapsedNanos;
+         servedWindowStartNanos = nowNanos;
+         servedFramesInWindow = 0;
+      }
+      lastSeenVideoTimestamp = currentVideoTimestamp;
+   }
+
+   private static String formatFps(double hz)
+   {
+      return Double.isNaN(hz) ? "--" : String.format("%.1f", hz);
+   }
+
+   private static String formatMillis(double ms)
+   {
+      return Double.isNaN(ms) ? "--" : String.format("%.1f", ms);
+   }
+
    private static Pane createImageViewPane(ImageView imageView)
    {
       return new Pane(imageView)
@@ -232,7 +291,18 @@ public class VideoViewer
       if (currentFrameData.frame == null)
          return;
 
+      // Hold the new pooled buffer alive past the JavaFX render pulse: retain it now and release the previously held
+      // "previous" buffer (served two updates ago, so its pulse has long since completed). Skipped when the polled slot
+      // hasn't advanced and when the reader doesn't use the pool.
+      retainPooledFrameBuffer(currentFrameData.frameBuffer);
+
       WritableImage currentFrame = currentFrameData.frame;
+
+      // PixelBuffer-backed images (e.g. MagewellVideoDataReader) need an FX-thread updateBuffer to mark the dirty
+      // region for the next pulse; setPixels-based readers leave frameBuffer null and rely on JavaFX's own dirty
+      // tracking.
+      if (currentFrameData.frameBuffer != null)
+         currentFrameData.frameBuffer.pixelBuffer.updateBuffer(b -> null);
 
       thumbnailContainer.setPrefWidth(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize);
       thumbnailContainer.setPrefHeight(THUMBNAIL_HIGHLIGHT_SCALE * defaultThumbnailSize * currentFrame.getHeight() / currentFrame.getWidth());
@@ -246,6 +316,13 @@ public class VideoViewer
          currentRobotTimestampLabel.setText(Long.toString(currentFrameData.currentRobotTimestamp));
          currentVideoTimestampLabel.setText(Long.toString(currentFrameData.currentVideoTimestamp));
          currentDemuxerTimestampLabel.setText(Long.toString(currentFrameData.currentDemuxerTimestamp));
+
+         updateServedFps(currentFrameData.currentVideoTimestamp);
+         perfOverlayLabel.setText(String.format("served %s  decode %s @ %s ms  source %s fps",
+                                                formatFps(servedFpsHz),
+                                                formatFps(reader.getDecodeRateHz()),
+                                                formatMillis(reader.getDecodeTimeMillis()),
+                                                formatFps(reader.getSourceFrameRateHz())));
 
          if (imageViewRootPane.get() != null)
          {
@@ -269,6 +346,36 @@ public class VideoViewer
       {
          videoWindowProperty.get().close();
          videoWindowProperty.set(null);
+      }
+      releaseHeldFrameBuffers();
+   }
+
+   /**
+    * Advances the two-deep ring of FX-held pooled buffers when a new buffer arrives. No-op when {@code newBuffer} is
+    * null (non-pooled reader) or identical to the currently held buffer (poll returned the same slot we already hold).
+    */
+   private void retainPooledFrameBuffer(FrameBuffer newBuffer)
+   {
+      if (newBuffer == null || newBuffer == fxHeldCurrent)
+         return;
+      if (fxHeldPrevious != null)
+         fxHeldPrevious.release();
+      fxHeldPrevious = fxHeldCurrent;
+      fxHeldCurrent = newBuffer;
+      fxHeldCurrent.retain();
+   }
+
+   private void releaseHeldFrameBuffers()
+   {
+      if (fxHeldPrevious != null)
+      {
+         fxHeldPrevious.release();
+         fxHeldPrevious = null;
+      }
+      if (fxHeldCurrent != null)
+      {
+         fxHeldCurrent.release();
+         fxHeldCurrent = null;
       }
    }
 

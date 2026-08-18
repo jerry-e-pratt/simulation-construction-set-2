@@ -60,15 +60,18 @@ public class FFMPEGVideoDataReader
          currentTimestamp.set(Math.min(maxVideoTimestamp, Math.max(0, (timestamp))));
       }
 
-      // clamp video timestamp + offset to be within bounds
+      // clamp video timestamp + offset to be within bounds (nanoseconds)
       long clampedTime = Math.min(maxVideoTimestamp, Math.max(0, currentTimestamp.get() + playbackOffset.get()));
 
-      // NOTE: timestamp passed in is in nanoseconds
-      if (clampedTime != frameGrabber.getTimestamp())
+      // FFmpegFrameGrabber.getTimestamp() and setVideoTimestamp() both use microseconds, so the
+      // "skip if unchanged" check must compare in the same units; the previous nanosecond-vs-microsecond
+      // comparison practically never matched and triggered a setVideoTimestamp seek on every paint.
+      long clampedTimeUs = convertNanosecondToVideoTimestamp(clampedTime);
+      if (clampedTimeUs != frameGrabber.getTimestamp())
       {
          try
          {
-            frameGrabber.setVideoTimestamp(convertNanosecondToVideoTimestamp(clampedTime));
+            frameGrabber.setVideoTimestamp(clampedTimeUs);
             currentFrame = frameGrabber.grabFrame();
          }
          catch (FrameGrabber.Exception e)

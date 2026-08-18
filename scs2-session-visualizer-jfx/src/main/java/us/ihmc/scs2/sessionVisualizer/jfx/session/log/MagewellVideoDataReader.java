@@ -1,19 +1,24 @@
 package us.ihmc.scs2.sessionVisualizer.jfx.session.log;
 
 import javafx.scene.image.Image;
+import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.PixelReader;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
+import javafx.scene.image.WritablePixelFormat;
 import logger_msgs.Camera;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.JavaFXFrameConverter;
+import us.ihmc.concurrent.ConcurrentCopier;
 import us.ihmc.scs2.session.log.MagewellScrubber;
 import us.ihmc.scs2.session.log.ProgressConsumer;
 import us.ihmc.scs2.session.log.TimestampScrubber;
+import us.ihmc.scs2.sessionVisualizer.jfx.session.log.VideoFrameBufferPool.FrameBuffer;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.IntBuffer;
 
 public class MagewellVideoDataReader implements VideoDataReader
 {
@@ -21,7 +26,27 @@ public class MagewellVideoDataReader implements VideoDataReader
    private static final int MAX_NON_VIDEO_FRAMES_TO_SKIP = 256;
 
    private final MagewellScrubber magewellScrubber;
-   private final FrameData frameData = new FrameData();
+   private final ConcurrentCopier<FrameData> imageBuffer = new ConcurrentCopier<>(FrameData::new);
+   // PixelBuffer requires premultiplied alpha; video frames are opaque so this is a no-op vs. non-premultiplied.
+   private static final WritablePixelFormat<IntBuffer> ARGB_PRE_PIXEL_FORMAT = PixelFormat.getIntArgbPreInstance();
+   // Pool of reference-counted FrameBuffers shared across the ConcurrentCopier slots. The writer transfers its single
+   // reference to the slot on commit; VideoViewer retains an extra reference for the duration of the FX render pulse so
+   // the writer cannot overwrite a PixelBuffer that the JavaFX render thread may still be uploading. See
+   // VideoFrameBufferPool for the full rationale and the race condition that motivated the pool.
+   private final VideoFrameBufferPool bufferPool = new VideoFrameBufferPool();
+   private final JavaFXFrameConverter frameConverter = new JavaFXFrameConverter();
+
+   // Decode-throughput instrumentation. Written by the background decode thread inside
+   // readVideoFrame; read by the FX thread via the VideoDataReader stats getters. Only decode-
+   // bearing calls (those that produced a fresh image frame) update the metrics; early-return
+   // calls where the requested PTS matched the previous read are excluded so the rate / time
+   // reflect actual decoder work rather than poll frequency.
+   private static final double DECODE_TIME_EWMA_ALPHA = 0.2;
+   private static final long DECODE_RATE_WINDOW_NANOS = 1_000_000_000L;
+   private volatile double decodeTimeMillisEwma = Double.NaN;
+   private volatile double decodeRateHz = Double.NaN;
+   private long decodeWindowStartNanos = 0L;
+   private int decodesInWindow = 0;
 
    public MagewellVideoDataReader(Camera camera, File dataDirectory, boolean hasTimeBase) throws IOException
    {
@@ -40,27 +65,92 @@ public class MagewellVideoDataReader implements VideoDataReader
 
    public void readVideoFrame(long queryRobotTimestamp)
    {
+      // The scrubber's contract: either an image-bearing Frame whose PTS is at or past the requested
+      // video timestamp, or null when the requested PTS matches the previous read (data rate exceeds
+      // video frame rate) or no image frame was found before EOF / the safety cap. In every null case
+      // we keep displaying the previously decoded frame.
+      long decodeStartNanos = System.nanoTime();
       Frame nextFrame = magewellScrubber.readVideoFrame(queryRobotTimestamp);
+      if (nextFrame == null)
+         return;
 
-      // The underlying FFmpegFrameGrabber.grabFrame() returns the next packet from any stream,
-      // so a multi-stream MP4 (video + audio + timecode) may yield non-image frames here.
-      int skipped = 0;
-      while (nextFrame != null && !hasImageData(nextFrame) && skipped < MAX_NON_VIDEO_FRAMES_TO_SKIP)
+      FrameData copyForWriting = imageBuffer.getCopyForWriting();
+      copyForWriting.queryRobotTimestamp = queryRobotTimestamp;
+      copyForWriting.currentRobotTimestamp = magewellScrubber.getCurrentRobotTimestamp();
+      copyForWriting.currentVideoTimestamp = magewellScrubber.getCurrentVideoTimestamp();
+      copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
+      writeFrameIntoSlot(nextFrame, copyForWriting);
+      imageBuffer.commit();
+      updateDecodeStatistics(decodeStartNanos);
+   }
+
+   private void updateDecodeStatistics(long decodeStartNanos)
+   {
+      long nowNanos = System.nanoTime();
+      double elapsedMillis = (nowNanos - decodeStartNanos) / 1_000_000.0;
+      double previous = decodeTimeMillisEwma;
+      decodeTimeMillisEwma = Double.isNaN(previous) ? elapsedMillis : DECODE_TIME_EWMA_ALPHA * elapsedMillis + (1.0 - DECODE_TIME_EWMA_ALPHA) * previous;
+
+      if (decodeWindowStartNanos == 0L)
+         decodeWindowStartNanos = nowNanos;
+      decodesInWindow++;
+      long windowElapsedNanos = nowNanos - decodeWindowStartNanos;
+      if (windowElapsedNanos >= DECODE_RATE_WINDOW_NANOS)
       {
-         nextFrame = magewellScrubber.getMagewellDemuxer().getNextFrame();
-         skipped++;
+         decodeRateHz = decodesInWindow * 1_000_000_000.0 / windowElapsedNanos;
+         decodeWindowStartNanos = nowNanos;
+         decodesInWindow = 0;
       }
+   }
 
-      // This is a copy that can be shown in the video view to debug timestamp issues
-      {
-         FrameData copyForWriting = frameData;
-         copyForWriting.queryRobotTimestamp = queryRobotTimestamp;
-         copyForWriting.currentRobotTimestamp = magewellScrubber.getCurrentRobotTimestamp();
-         copyForWriting.currentVideoTimestamp = magewellScrubber.getCurrentVideoTimestamp();
-         copyForWriting.currentDemuxerTimestamp = magewellScrubber.getMagewellDemuxer().getCurrentPTS();
-      }
+   @Override
+   public double getDecodeRateHz()
+   {
+      return decodeRateHz;
+   }
 
-      frameData.frame = convertFrameToWritableImage(nextFrame);
+   @Override
+   public double getDecodeTimeMillis()
+   {
+      return decodeTimeMillisEwma;
+   }
+
+   @Override
+   public double getSourceFrameRateHz()
+   {
+      return magewellScrubber.getMagewellDemuxer().getFrameRate();
+   }
+
+   /**
+    * Decodes {@code frameToConvert} into a {@link FrameBuffer} acquired from {@link #bufferPool} and binds the slot to
+    * it. The slot's previous {@link FrameBuffer} (if any) is released back to the pool; the pixel writes happen here on
+    * the decode thread, and the consumer must call {@link PixelBuffer#updateBuffer} on the JavaFX Application Thread to
+    * publish the change for the next pulse.
+    */
+   private void writeFrameIntoSlot(Frame frameToConvert, FrameData slot)
+   {
+      Image currentImage = frameConverter.convert(frameToConvert);
+      int width = (int) currentImage.getWidth();
+      int height = (int) currentImage.getHeight();
+
+      FrameBuffer buffer = bindFreshBufferToSlot(slot, width, height);
+      currentImage.getPixelReader().getPixels(0, 0, width, height, ARGB_PRE_PIXEL_FORMAT, buffer.pixelBuffer.getBuffer(), width);
+   }
+
+   /**
+    * Acquires a fresh {@link FrameBuffer} from {@link #bufferPool}, releases the slot's previous buffer (if any), and
+    * binds the new buffer into the slot. The pool guarantees the returned buffer is not currently held by any other
+    * producer or consumer, so the decode thread can safely write its pixels.
+    */
+   private FrameBuffer bindFreshBufferToSlot(FrameData slot, int width, int height)
+   {
+      FrameBuffer previous = slot.frameBuffer;
+      FrameBuffer next = bufferPool.acquire(width, height);
+      slot.frameBuffer = next;
+      slot.frame = next.image;
+      if (previous != null)
+         previous.release();
+      return next;
    }
 
    private static boolean hasImageData(Frame frame)
@@ -118,7 +208,7 @@ public class MagewellVideoDataReader implements VideoDataReader
 
    public FrameData pollCurrentFrame()
    {
-      return frameData;
+      return imageBuffer.getCopyForReading();
    }
 
    public int getCurrentIndex()
