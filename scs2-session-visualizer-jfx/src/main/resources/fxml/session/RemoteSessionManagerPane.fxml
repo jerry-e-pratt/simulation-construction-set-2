@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import com.jfoenix.controls.JFXButton?>
+<?import com.jfoenix.controls.JFXComboBox?>
 <?import com.jfoenix.controls.JFXSpinner?>
 <?import com.jfoenix.controls.JFXTextField?>
 <?import com.jfoenix.controls.JFXTreeTableView?>
@@ -29,9 +30,10 @@
                         <HBox fx:id="staticControlsPane" alignment="CENTER_LEFT" minWidth="-Infinity" spacing="5.0" HBox.hgrow="SOMETIMES">
                             <children>
                                 <Label text="Register static host"/>
+                                <JFXComboBox fx:id="protocolComboBox" prefWidth="110.0"/>
                                 <JFXTextField fx:id="staticHostTextField" alignment="CENTER_RIGHT"/>
                                 <Label text=":"/>
-                                <JFXTextField fx:id="staticPortTextField" prefWidth="40.0" text="8008"/>
+                                <JFXTextField fx:id="staticPortTextField" prefWidth="50.0" text="8008"/>
                                 <JFXButton fx:id="createStaticHostButton" buttonType="RAISED" contentDisplay="GRAPHIC_ONLY" graphicTextGap="0.0">
                                     <graphic>
                                         <FontIcon>

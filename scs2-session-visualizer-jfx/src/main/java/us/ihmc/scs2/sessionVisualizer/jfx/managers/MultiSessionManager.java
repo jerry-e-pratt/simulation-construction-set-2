@@ -23,6 +23,7 @@ import us.ihmc.scs2.session.SessionIOTools;
 import us.ihmc.scs2.session.SessionPropertiesHelper;
 import us.ihmc.scs2.session.log.LogSession;
 import us.ihmc.scs2.session.mcap.MCAPLogSession;
+import us.ihmc.scs2.session.foxglove.FoxgloveRemoteSession;
 import us.ihmc.scs2.session.remote.RemoteSession;
 import us.ihmc.scs2.sessionVisualizer.jfx.MainWindowController;
 import us.ihmc.scs2.sessionVisualizer.jfx.SCSGuiConfiguration;
@@ -318,7 +319,7 @@ public class MultiSessionManager
    {
       if (session instanceof LogSession)
          return LogSessionManagerController.class;
-      if (session instanceof RemoteSession)
+      if (session instanceof RemoteSession || session instanceof FoxgloveRemoteSession)
          return RemoteSessionManagerController.class;
       if (session instanceof MCAPLogSession)
          return MCAPLogSessionManagerController.class;

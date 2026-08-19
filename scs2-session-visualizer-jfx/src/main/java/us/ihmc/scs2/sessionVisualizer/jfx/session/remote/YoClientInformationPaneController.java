@@ -10,6 +10,9 @@ import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.Pane;
 import us.ihmc.commons.Conversions;
 import us.ihmc.robotDataLogger.websocket.command.DataServerCommand;
+import us.ihmc.scs2.session.Session;
+import us.ihmc.scs2.session.foxglove.FoxgloveCameraFrame;
+import us.ihmc.scs2.session.foxglove.FoxgloveRemoteSession;
 import us.ihmc.scs2.session.remote.LoggerStatusUpdater;
 import us.ihmc.scs2.session.remote.RemoteSession;
 import us.ihmc.scs2.sessionVisualizer.jfx.session.SessionInfoController;
@@ -33,7 +36,7 @@ public class YoClientInformationPaneController extends ObservedAnimationTimer im
    private Supplier<String> logDurationValueSupplier;
    private Supplier<String> cameraValueSupplier;
 
-   private final ObjectProperty<RemoteSession> activeSessionProperty = new SimpleObjectProperty<>(this, "activeSession", null);
+   private final ObjectProperty<Session> activeSessionProperty = new SimpleObjectProperty<>(this, "activeSession", null);
 
    public void initialize()
    {
@@ -41,40 +44,57 @@ public class YoClientInformationPaneController extends ObservedAnimationTimer im
 
       delayValueSupplier = () ->
       {
-         RemoteSession activeSession = activeSessionProperty.get();
-         if (activeSession == null)
-            return null;
-         else
-            return Conversions.nanosecondsToMilliseconds(activeSession.getDelay()) + "ms";
+         Session activeSession = activeSessionProperty.get();
+         if (activeSession instanceof RemoteSession remoteSession)
+            return Conversions.nanosecondsToMilliseconds(remoteSession.getDelay()) + "ms";
+         if (activeSession instanceof FoxgloveRemoteSession foxgloveSession)
+            return Conversions.nanosecondsToMilliseconds(foxgloveSession.getDelay()) + "ms";
+         return null;
       };
 
       logDurationValueSupplier = () ->
       {
-         RemoteSession activeSession = activeSessionProperty.get();
-         if (activeSession == null)
-            return null;
-
-         LoggerStatusUpdater loggerStatusUpdater = activeSession.getLoggerStatusUpdater();
-
-         if (loggerStatusUpdater.isLogging())
-            return loggerStatusUpdater.getCurrentLogDuration() + "sec";
-         else
+         Session activeSession = activeSessionProperty.get();
+         if (activeSession instanceof RemoteSession remoteSession)
+         {
+            LoggerStatusUpdater loggerStatusUpdater = remoteSession.getLoggerStatusUpdater();
+            if (loggerStatusUpdater.isLogging())
+               return loggerStatusUpdater.getCurrentLogDuration() + "sec";
             return "Logger offline";
+         }
+         if (activeSession instanceof FoxgloveRemoteSession)
+            return "Foxglove live";
+         return null;
       };
 
       cameraValueSupplier = () ->
       {
-         RemoteSession activeSession = activeSessionProperty.get();
-         if (activeSession == null)
-            return null;
-
-         LoggerStatusUpdater loggerStatusUpdater = activeSession.getLoggerStatusUpdater();
-
-         return loggerStatusUpdater.isCameraRecording() ? "Recording" : "Off";
+         Session activeSession = activeSessionProperty.get();
+         if (activeSession instanceof RemoteSession remoteSession)
+         {
+            LoggerStatusUpdater loggerStatusUpdater = remoteSession.getLoggerStatusUpdater();
+            return loggerStatusUpdater.isCameraRecording() ? "Recording" : "Off";
+         }
+         if (activeSession instanceof FoxgloveRemoteSession foxgloveSession)
+         {
+            int cameras = 0;
+            for (FoxgloveCameraFrame frame : foxgloveSession.getLatestCameraFrames())
+            {
+               if (frame.getData().length > 0)
+                  cameras++;
+            }
+            return cameras == 0 ? "No frames" : cameras + " live";
+         }
+         return null;
       };
    }
 
-   public ObjectProperty<RemoteSession> activeSessionProperty()
+   public void setLiveSession(Session session)
+   {
+      activeSessionProperty.set(session);
+   }
+
+   public ObjectProperty<Session> activeSessionProperty()
    {
       return activeSessionProperty;
    }
@@ -100,10 +120,8 @@ public class YoClientInformationPaneController extends ObservedAnimationTimer im
    @FXML
    public void requestRestartLog()
    {
-      RemoteSession remoteSession = activeSessionProperty.get();
-      if (remoteSession == null)
-         return;
-      remoteSession.sendCommandToYoVariableServer(DataServerCommand.RESTART_LOG, 0);
+      if (activeSessionProperty.get() instanceof RemoteSession remoteSession)
+         remoteSession.sendCommandToYoVariableServer(DataServerCommand.RESTART_LOG, 0);
    }
 
    private void updateLabel(Label label, Supplier<String> textSupplier, String defaultText)

@@ -23,6 +23,7 @@ import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextField;
@@ -42,7 +43,9 @@ import us.ihmc.robotDataLogger.YoVariableClient;
 import us.ihmc.robotDataLogger.websocket.client.discovery.DataServerDiscoveryClient;
 import us.ihmc.robotDataLogger.websocket.client.discovery.HTTPDataServerConnection;
 import us.ihmc.robotDataLogger.websocket.client.discovery.HTTPDataServerDescription;
+import us.ihmc.scs2.session.foxglove.FoxgloveRemoteSession;
 import us.ihmc.scs2.session.remote.FunctionalDataServerDiscoveryListener;
+import us.ihmc.scs2.session.remote.RemoteSessionProtocol;
 import us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizerIOTools;
 import us.ihmc.scs2.sessionVisualizer.jfx.SessionVisualizerTopics;
 import us.ihmc.scs2.sessionVisualizer.jfx.managers.BackgroundExecutorManager;
@@ -72,6 +75,8 @@ public class RemoteSessionManagerController implements SessionControlsController
    @FXML
    private TextField staticHostTextField, staticPortTextField;
    @FXML
+   private ComboBox<RemoteSessionProtocol> protocolComboBox;
+   @FXML
    private Button createStaticHostButton;
 
    @FXML
@@ -81,6 +86,8 @@ public class RemoteSessionManagerController implements SessionControlsController
 
    private YoVariableClient client;
    private final RemoteSessionFactory sessionFactory = new RemoteSessionFactory();
+   private final ObjectProperty<FoxgloveRemoteSession> foxgloveSessionProperty = new SimpleObjectProperty<>(this, "foxgloveSession", null);
+   private final ObservableList<FoxgloveHostListStore.HostPort> foxgloveStaticHosts = FXCollections.observableArrayList();
 
    private TreeItem<SessionInfo> rootSession;
    private ObservableMap<HTTPDataServerDescription, TreeItem<SessionInfo>> descriptionToTreeItemMap = FXCollections.observableMap(new HashMap<>());
@@ -104,6 +111,7 @@ public class RemoteSessionManagerController implements SessionControlsController
 
       mainPane.getStylesheets().add(SessionVisualizerIOTools.GENERAL_STYLESHEET.toExternalForm());
 
+      TreeTableColumn<SessionInfo, String> typeColumn = createColumn("Type", 100.0, 80.0, 140.0, SessionInfo::getType);
       TreeTableColumn<SessionInfo, String> hostColumn = createColumn("Host", 150.0, 100.0, 200.0, SessionInfo::getHost);
       TreeTableColumn<SessionInfo, String> portColumn = createColumn("Port", 80.0, SessionInfo::getPort);
       TreeTableColumn<SessionInfo, String> hostNameColumn = createColumn("HostName", 175.0, 100.0, 250.0, SessionInfo::getHostName);
@@ -114,10 +122,18 @@ public class RemoteSessionManagerController implements SessionControlsController
       sessionTreeTableView.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
       sessionTreeTableView.setRoot(rootSession);
       sessionTreeTableView.setShowRoot(false);
-      sessionTreeTableView.getColumns().setAll(hostColumn, portColumn, hostNameColumn, sessionNameColumn);
+      sessionTreeTableView.getColumns().setAll(typeColumn, hostColumn, portColumn, hostNameColumn, sessionNameColumn);
 
       TextFormatter<Integer> portFormatter = new TextFormatter<>(new IntegerConverter(), DEFAULT_PORT, new PositiveIntegerValueFilter());
       staticPortTextField.setTextFormatter(portFormatter);
+
+      protocolComboBox.getItems().setAll(RemoteSessionProtocol.values());
+      protocolComboBox.getSelectionModel().select(RemoteSessionProtocol.YOVARIABLE);
+      protocolComboBox.valueProperty().addListener((o, oldValue, newValue) ->
+      {
+         if (newValue != null)
+            portFormatter.setValue(newValue.getDefaultPort());
+      });
 
       createStaticHostButton.setDisable(true);
 
@@ -132,7 +148,13 @@ public class RemoteSessionManagerController implements SessionControlsController
 
       createStaticHostButton.setOnAction(e ->
       {
-         staticDescriptionProperty.set(new HTTPDataServerDescription(staticHostTextField.getText(), Integer.parseInt(staticPortTextField.getText()), null, true));
+         RemoteSessionProtocol protocol = selectedProtocol();
+         String host = staticHostTextField.getText();
+         int port = Integer.parseInt(staticPortTextField.getText());
+         if (protocol == RemoteSessionProtocol.FOXGLOVE)
+            addFoxgloveHost(new FoxgloveHostListStore.HostPort(host, port), true);
+         else
+            staticDescriptionProperty.set(new HTTPDataServerDescription(host, port, null, true));
       });
 
       staticDescriptionProperty.addListener((o, oldValue, newValue) ->
@@ -178,8 +200,8 @@ public class RemoteSessionManagerController implements SessionControlsController
 
       MenuTools.setupContextMenu(sessionTreeTableView,
                                         TreeTableViewTools.removeMenuItemFactory(false,
-                                                                                 sessionInfo -> registeredStaticDescriptions.contains(sessionInfo.getDescription()),
-                                                                                 sessionInfo -> registeredStaticDescriptions.remove(sessionInfo.getDescription())));
+                                                                                 this::canRemoveStaticHost,
+                                                                                 this::removeStaticHost));
 
       startSessionButton.setDisable(true);
       endSessionButton.disableProperty().bind(sessionInProgressProperty.not());
@@ -200,6 +222,10 @@ public class RemoteSessionManagerController implements SessionControlsController
          {
             startSessionButton.setDisable(true);
          }
+         else if (newValue.getValue().getProtocol() == RemoteSessionProtocol.FOXGLOVE)
+         {
+            startSessionButton.setDisable(false);
+         }
          else
          {
             HTTPDataServerConnection connection = newValue.getValue().getConnection();
@@ -211,6 +237,8 @@ public class RemoteSessionManagerController implements SessionControlsController
       });
 
       StaticHostListLoader.load().forEach(this::addDescription);
+      FoxgloveHostListStore.load().forEach(host -> addFoxgloveHost(host, false));
+      foxgloveStaticHosts.addListener((ListChangeListener<FoxgloveHostListStore.HostPort>) c -> FoxgloveHostListStore.save(new ArrayList<>(c.getList())));
       registeredStaticDescriptions.addListener((ListChangeListener<HTTPDataServerDescription>) c ->
       {
          try
@@ -244,10 +272,12 @@ public class RemoteSessionManagerController implements SessionControlsController
          informationPaneController = loader.getController();
          informationPaneController.initialize();
          informationPaneController.start();
-         informationPaneController.activeSessionProperty().bind(sessionFactory.activeSessionProperty());
+         sessionFactory.activeSessionProperty().addListener((o, oldValue, newValue) -> informationPaneController.setLiveSession(newValue));
+         foxgloveSessionProperty.addListener((o, oldValue, newValue) -> informationPaneController.setLiveSession(newValue));
          SessionVisualizerTopics topics = toolkit.getTopics();
          JavaFXMessager messager = toolkit.getMessager();
          sessionFactory.activeSessionProperty().addListener((o, oldValue, newValue) -> messager.submitMessage(topics.getStartNewSessionRequest(), newValue));
+         foxgloveSessionProperty.addListener((o, oldValue, newValue) -> messager.submitMessage(topics.getStartNewSessionRequest(), newValue));
       }
       catch (IOException e)
       {
@@ -327,11 +357,35 @@ public class RemoteSessionManagerController implements SessionControlsController
       setIsLoading(true);
       sessionInProgressProperty.set(true);
 
+      SessionInfo info = selectedItem.getValue();
+      if (info.getProtocol() == RemoteSessionProtocol.FOXGLOVE)
+      {
+         backgroundExecutorManager.executeInBackground(() ->
+         {
+            try
+            {
+               FoxgloveRemoteSession session = FoxgloveRemoteSession.connect(info.getHost().get(), Integer.parseInt(info.getPort().get()));
+               JavaFXMissingTools.runLater(getClass(), () ->
+               {
+                  info.setHostName(session.getSessionName());
+                  info.setSessionName(session.getSessionName());
+                  foxgloveSessionProperty.set(session);
+               });
+            }
+            catch (Throwable e)
+            {
+               e.printStackTrace();
+               JavaFXMissingTools.runLater(getClass(), () -> unloadSession());
+            }
+         });
+         return;
+      }
+
       backgroundExecutorManager.executeInBackground(() ->
       {
          try
          {
-            client.start(DEFAULT_TIMEOUT, selectedItem.getValue().getConnection());
+            client.start(DEFAULT_TIMEOUT, info.getConnection());
          }
          catch (Throwable e)
          {
@@ -352,6 +406,12 @@ public class RemoteSessionManagerController implements SessionControlsController
       if (!sessionInProgressProperty.get())
          return;
       sessionFactory.unloadSession();
+      FoxgloveRemoteSession foxgloveSession = foxgloveSessionProperty.get();
+      if (foxgloveSession != null)
+      {
+         foxgloveSession.close();
+         foxgloveSessionProperty.set(null);
+      }
       try
       {
          client.stop();
@@ -411,6 +471,50 @@ public class RemoteSessionManagerController implements SessionControlsController
       JavaFXMissingTools.runLaterIfNeeded(getClass(), () -> loadingSpinner.setVisible(isLoading));
    }
 
+   private RemoteSessionProtocol selectedProtocol()
+   {
+      RemoteSessionProtocol protocol = protocolComboBox.getValue();
+      return protocol != null ? protocol : RemoteSessionProtocol.YOVARIABLE;
+   }
+
+   private void addFoxgloveHost(FoxgloveHostListStore.HostPort hostPort, boolean persist)
+   {
+      for (TreeItem<SessionInfo> child : rootSession.getChildren())
+      {
+         SessionInfo existing = child.getValue();
+         if (existing.getProtocol() == RemoteSessionProtocol.FOXGLOVE && hostPort.host.equals(existing.getHost().get())
+             && Integer.toString(hostPort.port).equals(existing.getPort().get()))
+            return;
+      }
+      SessionInfo sessionInfo = new SessionInfo();
+      sessionInfo.setProtocol(RemoteSessionProtocol.FOXGLOVE);
+      sessionInfo.setHostAndPort(hostPort.host, hostPort.port);
+      sessionInfo.setHostName(OFFLINE_HOSTNAME_DESCRIPTION);
+      sessionInfo.setSessionName("ws://" + hostPort.host + ":" + hostPort.port);
+      rootSession.getChildren().add(new TreeItem<>(sessionInfo));
+      if (persist)
+         foxgloveStaticHosts.add(hostPort);
+   }
+
+   private boolean canRemoveStaticHost(SessionInfo sessionInfo)
+   {
+      if (sessionInfo.getProtocol() == RemoteSessionProtocol.FOXGLOVE)
+         return true;
+      return registeredStaticDescriptions.contains(sessionInfo.getDescription());
+   }
+
+   private void removeStaticHost(SessionInfo sessionInfo)
+   {
+      if (sessionInfo.getProtocol() == RemoteSessionProtocol.FOXGLOVE)
+      {
+         foxgloveStaticHosts.removeIf(host -> host.host.equals(sessionInfo.getHost().get())
+                                              && Integer.toString(host.port).equals(sessionInfo.getPort().get()));
+         rootSession.getChildren().removeIf(item -> item.getValue() == sessionInfo);
+         return;
+      }
+      registeredStaticDescriptions.remove(sessionInfo.getDescription());
+   }
+
    private TreeTableColumn<SessionInfo, String> createColumn(String name, double prefWidth, Function<SessionInfo, StringProperty> fieldProvider)
    {
       return createColumn(name, prefWidth, prefWidth, prefWidth, fieldProvider);
@@ -432,6 +536,8 @@ public class RemoteSessionManagerController implements SessionControlsController
 
    public static class SessionInfo extends RecursiveTreeObject<SessionInfo>
    {
+      private final StringProperty type = new SimpleStringProperty(this, "type", RemoteSessionProtocol.YOVARIABLE.getDisplayName());
+      private RemoteSessionProtocol protocol = RemoteSessionProtocol.YOVARIABLE;
       private final StringProperty host = new SimpleStringProperty(this, "host", null);
       private final StringProperty port = new SimpleStringProperty(this, "port", null);
       private final StringProperty hostName = new SimpleStringProperty(this, "hostName", OFFLINE_HOSTNAME_DESCRIPTION);
@@ -497,6 +603,38 @@ public class RemoteSessionManagerController implements SessionControlsController
       public ObjectProperty<HTTPDataServerConnection> connectionProperty()
       {
          return connectionProperty;
+      }
+
+      public void setProtocol(RemoteSessionProtocol protocol)
+      {
+         this.protocol = protocol;
+         type.set(protocol.getDisplayName());
+      }
+
+      public RemoteSessionProtocol getProtocol()
+      {
+         return protocol;
+      }
+
+      public void setHostAndPort(String hostValue, int portValue)
+      {
+         host.set(hostValue);
+         port.set(Integer.toString(portValue));
+      }
+
+      public void setHostName(String value)
+      {
+         hostName.set(value);
+      }
+
+      public void setSessionName(String value)
+      {
+         sessionName.set(value);
+      }
+
+      public StringProperty getType()
+      {
+         return type;
       }
 
       public StringProperty getHost()
