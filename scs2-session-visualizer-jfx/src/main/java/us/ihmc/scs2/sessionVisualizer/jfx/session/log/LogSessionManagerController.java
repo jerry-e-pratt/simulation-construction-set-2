@@ -39,6 +39,7 @@ import org.apache.commons.lang3.tuple.ImmutablePair;
 import us.ihmc.commons.lists.PairList;
 import us.ihmc.log.LogTools;
 import us.ihmc.messager.javafx.JavaFXMessager;
+import us.ihmc.scs2.session.Session;
 import us.ihmc.scs2.session.log.ChildLogData;
 import us.ihmc.scs2.session.log.ChildLogSynchronization;
 import us.ihmc.scs2.session.log.LogDataReader;
@@ -180,7 +181,8 @@ public class LogSessionManagerController implements SessionControlsController
          }
          else
          {
-            messager.submitMessage(topics.getStartNewSessionRequest(), newValue);
+            if (toolkit.getSession() != newValue)
+               messager.submitMessage(topics.getStartNewSessionRequest(), newValue);
 
             // Remove these controls that were added during the last session
             addedLogCropperProperty.get().clear();
@@ -1098,6 +1100,16 @@ public class LogSessionManagerController implements SessionControlsController
    {
       enableVariableFilterToggleButton.setSelected(false);
       variableFilterControllerProperty.set(null);
+   }
+
+   @Override
+   public void bindRunningSession(Session session)
+   {
+      if (!(session instanceof LogSession logSession))
+         return;
+      if (activeSessionProperty.get() == logSession)
+         return;
+      activeSessionProperty.set(logSession);
    }
 
    @Override
