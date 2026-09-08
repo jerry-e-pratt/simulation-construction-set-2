@@ -200,6 +200,68 @@ public class MultiSessionManagerTest
    }
 
    @Test
+   public void testReplacingSessionDoesNotPromptWhenSaveConfigurationPromptIsSkipped() throws Exception
+   {
+      boolean previouslySkipped = SessionVisualizerIOTools.isSaveConfigurationPromptSkipped();
+      boolean previousAnswer = previouslySkipped && SessionVisualizerIOTools.getSkippedSaveConfigurationAnswer();
+      try
+      {
+         SessionVisualizerIOTools.setSkipSaveConfigurationPrompt(false);
+
+         File firstDirectory = SessionControlsTestLog.createLogDirectory("skip-prompt-a", "first-log");
+         File secondDirectory = SessionControlsTestLog.createLogDirectory("skip-prompt-b", "second-log");
+         LogSession first = new LogSession(firstDirectory, null);
+         LogSession second = new LogSession(secondDirectory, null);
+
+         startSessionOnFx(first);
+         assertTrue(toolkit.hasActiveSession());
+
+         JavaFXMissingTools.runLater(getClass(),
+                                     () -> toolkit.getMessager().submitMessage(toolkit.getTopics().getStartNewSessionRequest(), second));
+
+         boolean sawSavePrompt = false;
+         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+         while (System.nanoTime() < deadline)
+         {
+            AtomicReference<Session> active = new AtomicReference<>();
+            AtomicReference<Boolean> promptVisible = new AtomicReference<>(false);
+            JavaFXMissingTools.runAndWait(getClass(), () ->
+            {
+               Stage prompt = findOpenStage("Confirmation");
+               promptVisible.set(prompt != null);
+               if (prompt != null)
+                  dismissConfirmationPrompt(prompt);
+               active.set(toolkit.getSession());
+            });
+            if (Boolean.TRUE.equals(promptVisible.get()))
+            {
+               sawSavePrompt = true;
+               break;
+            }
+            if (active.get() == second)
+               break;
+            Thread.sleep(50);
+         }
+
+         assertFalse(sawSavePrompt, "Replacing a session should not ask to save the default configuration when Don't ask again is set");
+         assertEquals(second, toolkit.getSession());
+      }
+      finally
+      {
+         JavaFXMissingTools.runAndWait(getClass(), () ->
+         {
+            Stage prompt = findOpenStage("Confirmation");
+            if (prompt != null)
+               dismissConfirmationPrompt(prompt);
+         });
+         if (previouslySkipped)
+            SessionVisualizerIOTools.setSkipSaveConfigurationPrompt(previousAnswer);
+         else
+            SessionVisualizerIOTools.resetSaveConfigurationPrompt();
+      }
+   }
+
+   @Test
    public void testOpenLogMenuAfterCliStartShowsAlreadyBoundWindow() throws Exception
    {
       File logDirectory = SessionControlsTestLog.createLogDirectory("cli-bind-menu");
@@ -235,6 +297,15 @@ public class MultiSessionManagerTest
                stage.close();
          }
       }
+   }
+
+   private static void dismissConfirmationPrompt(Stage prompt)
+   {
+      Button no = findButton(prompt.getScene().getRoot(), "No");
+      if (no != null)
+         no.fire();
+      else
+         prompt.close();
    }
 
    private static Stage findOpenStage(String title)
